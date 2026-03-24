@@ -339,16 +339,18 @@ input, select, textarea { font-family: var(--font-body); outline: none; }
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   background: var(--bg);
   color: var(--text);
   border: none;
   border-bottom: 2px solid var(--surface-max);
-  padding: 10px 0;
+  padding: 10px 12px;
   font-size: 0.9rem;
   font-weight: 500;
   transition: border-color 0.15s;
   width: 100%;
+  border-radius: 4px 4px 0 0;
 }
 
 .field input:focus,

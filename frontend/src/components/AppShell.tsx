@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
-  Ticket, Package, DollarSign, ReceiptText, Users, LogOut
+  Ticket, Package, DollarSign, ReceiptText, Users, LogOut, Utensils
 } from 'lucide-react';
+
 
 const NAV = [
   { href: '/tickets', label: 'Tickets',       icon: Ticket       },
   { href: '/inventario', label: 'Inventario', icon: Package      },
+  { href: '/menu',       label: 'Menú Web',   icon: Utensils     },
   { href: '/finanzas',   label: 'Finanzas',   icon: DollarSign   },
   { href: '/gastos',     label: 'Gastos',     icon: ReceiptText  },
   { href: '/nomina',     label: 'Nómina / Pagos', icon: Users    },
@@ -27,7 +29,6 @@ export default function AppShell({ children, user }: { children: React.ReactNode
           <div className="sidebar-logo-text">CARAMBA</div>
           <div className="sidebar-logo-sub">Control</div>
         </div>
-
         <div className="sidebar-divider" />
 
         <nav className="sidebar-nav">
