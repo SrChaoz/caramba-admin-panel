@@ -26,14 +26,38 @@ type Pedido = {
 
 type DialogType = 'confirm' | 'ready' | 'deliver' | 'delete' | null;
 
-/** Split flat ingredient array into per-burrito arrays */
+/** Split ingredient array into per-burrito arrays.
+ * 
+ * - Modo 'different': el array contiene separadores '--- Burrito N'.
+ *   Dividimos por esos marcadores.
+ * - Modo 'same': el array tiene los ingredientes de UN solo burrito.
+ *   Los repetimos para cada slot (todos son iguales).
+ */
 function splitIngredients(ingredientes: string[], cantidad: number): string[][] {
   if (!ingredientes?.length) return Array.from({ length: Math.max(cantidad, 1) }, () => []);
   if (cantidad <= 1) return [ingredientes];
-  const perBurrito = Math.ceil(ingredientes.length / cantidad);
-  return Array.from({ length: cantidad }, (_, i) =>
-    ingredientes.slice(i * perBurrito, (i + 1) * perBurrito)
-  );
+
+  // Detectar modo 'different': el array contiene marcadores '--- Burrito N'
+  const hasSeparators = ingredientes.some(i => i.startsWith('---'));
+
+  if (hasSeparators) {
+    // Dividir por marcadores
+    const groups: string[][] = [];
+    let current: string[] = [];
+    for (const item of ingredientes) {
+      if (item.startsWith('---')) {
+        groups.push(current);
+        current = [];
+      } else {
+        current.push(item);
+      }
+    }
+    groups.push(current);
+    return groups;
+  }
+
+  // Modo 'same': repetir la misma lista para cada burrito
+  return Array.from({ length: cantidad }, () => [...ingredientes]);
 }
 
 export default function TicketsPage() {
@@ -42,6 +66,7 @@ export default function TicketsPage() {
   const [checking, setChecking]     = useState(true);
   const [pedidos, setPedidos]       = useState<Pedido[]>([]);
   const [search, setSearch]         = useState('');
+  const [dayFilter, setDayFilter]   = useState<string | null>(null);
   const [detailTicket, setDetail]   = useState<Pedido | null>(null);
   const [dialog, setDialog]         = useState<{ type: Exclude<DialogType, null>; ticket: Pedido } | null>(null);
   const [working, setWorking]       = useState(false);
@@ -98,11 +123,16 @@ export default function TicketsPage() {
 
   if (checking) return null;
 
-  const filtered = pedidos.filter(p =>
-    p.codigo_ticket?.toLowerCase().includes(search.toLowerCase()) ||
-    p.cliente_nombre?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = pedidos.filter(p => {
+    const matchSearch =
+      p.codigo_ticket?.toLowerCase().includes(search.toLowerCase()) ||
+      p.cliente_nombre?.toLowerCase().includes(search.toLowerCase());
+    const matchDay = !dayFilter || p.dia_entrega?.toUpperCase().includes(dayFilter.toUpperCase());
+    return matchSearch && matchDay;
+  });
   const byEstado = (e: string) => filtered.filter(p => p.estado === e);
+
+  const DAY_FILTERS = ['VIERNES', 'SÁBADO', 'DOMINGO'];
 
   return (
     <AppShell user={session?.user}>
@@ -116,6 +146,33 @@ export default function TicketsPage() {
           <span className="topbar-subtitle">Live Kitchen Monitor</span>
         </div>
         <div className="topbar-actions">
+          {/* Day filter chips */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {(['TODOS', ...DAY_FILTERS]).map(day => {
+              const active = day === 'TODOS' ? !dayFilter : dayFilter === day;
+              return (
+                <button
+                  key={day}
+                  onClick={() => setDayFilter(day === 'TODOS' ? null : day)}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 4,
+                    fontSize: '0.65rem',
+                    fontWeight: 800,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    border: active ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                    background: active ? 'var(--accent)' : 'transparent',
+                    color: active ? '#fff' : 'var(--text-dim)',
+                  }}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
           <div className="topbar-search">
             <Search size={14} color="var(--text-dim)" />
             <input placeholder="Buscar por ID o cliente..." value={search} onChange={e => setSearch(e.target.value)} />
