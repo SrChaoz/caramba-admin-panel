@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
-import { Search, Clock, X, Check, ChevronRight, MapPin, Phone, Calendar, Package, DollarSign, Trash2 } from 'lucide-react';
+import { Search, Clock, X, Check, ChevronRight, Phone, Calendar, Package, Trash2, Edit2, Save } from 'lucide-react';
 
 type Extra  = { nombre: string; precio: number };
 type Pedido = {
@@ -25,23 +25,18 @@ type Pedido = {
 };
 
 type DialogType = 'confirm' | 'ready' | 'deliver' | 'delete' | null;
+type TabType = 'all' | 'no_confirmado' | 'pendiente' | 'para_entregar';
+type MenuTopping = { id: string; nombre: string; emoji: string; precio_extra: number; precio_surcharge: number; };
+type MenuConfig = { basePrice: number; freeToppingsLimit: number; };
 
-/** Split ingredient array into per-burrito arrays.
- * 
- * - Modo 'different': el array contiene separadores '--- Burrito N'.
- *   Dividimos por esos marcadores.
- * - Modo 'same': el array tiene los ingredientes de UN solo burrito.
- *   Los repetimos para cada slot (todos son iguales).
- */
+/** Split ingredient array into per-burrito arrays. */
 function splitIngredients(ingredientes: string[], cantidad: number): string[][] {
   if (!ingredientes?.length) return Array.from({ length: Math.max(cantidad, 1) }, () => []);
   if (cantidad <= 1) return [ingredientes];
 
-  // Detectar modo 'different': el array contiene marcadores '--- Burrito N'
   const hasSeparators = ingredientes.some(i => i.startsWith('---'));
 
   if (hasSeparators) {
-    // Dividir por marcadores
     const groups: string[][] = [];
     let current: string[] = [];
     for (const item of ingredientes) {
@@ -56,8 +51,26 @@ function splitIngredients(ingredientes: string[], cantidad: number): string[][] 
     return groups;
   }
 
-  // Modo 'same': repetir la misma lista para cada burrito
+  // same mode: repeat for each burrito
   return Array.from({ length: cantidad }, () => [...ingredientes]);
+}
+
+/** Recalculate total from ingredients using menu config */
+function calcTotal(ingredientes: string[], cantidad: number, toppings: MenuTopping[], cfg: MenuConfig): number {
+  const { basePrice, freeToppingsLimit } = cfg;
+  // surcharge: within free limit
+  const inLimit = ingredientes.slice(0, freeToppingsLimit);
+  const surchargeCost = inLimit.reduce((acc, nom) => {
+    const t = toppings.find(to => to.nombre === nom);
+    return acc + (t?.precio_surcharge ?? 0);
+  }, 0);
+  // extras: beyond free limit
+  const extras = ingredientes.slice(freeToppingsLimit);
+  const extraCost = extras.reduce((acc, nom) => {
+    const t = toppings.find(to => to.nombre === nom);
+    return acc + (t?.precio_extra ?? 0);
+  }, 0);
+  return (basePrice + surchargeCost + extraCost) * cantidad;
 }
 
 export default function TicketsPage() {
@@ -65,11 +78,18 @@ export default function TicketsPage() {
   const [session, setSession]       = useState<any>(null);
   const [checking, setChecking]     = useState(true);
   const [pedidos, setPedidos]       = useState<Pedido[]>([]);
+  const [menuToppings, setMenuToppings] = useState<MenuTopping[]>([]);
+  const [menuConfig, setMenuConfig]    = useState<MenuConfig>({ basePrice: 3.50, freeToppingsLimit: 8 });
   const [search, setSearch]         = useState('');
   const [dayFilter, setDayFilter]   = useState<string | null>(null);
+  const [activeTab, setActiveTab]   = useState<TabType>('all');
   const [detailTicket, setDetail]   = useState<Pedido | null>(null);
+  const [isEditing, setIsEditing]   = useState(false);
+  const [editDraft, setEditDraft]   = useState<Pedido | null>(null);
+  const [otroIngrediente, setOtro]  = useState('');
   const [dialog, setDialog]         = useState<{ type: Exclude<DialogType, null>; ticket: Pedido } | null>(null);
   const [working, setWorking]       = useState(false);
+  const [saving, setSaving]         = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -89,6 +109,30 @@ export default function TicketsPage() {
   useEffect(() => {
     if (!session) return;
     fetchPedidos();
+
+    // Fetch menu toppings + config for the editor
+    (async () => {
+      const [prodRes, topRes] = await Promise.all([
+        supabase.from('menu_productos').select('precio_base,free_toppings_limit').eq('id', 'burrito-armalo').single(),
+        supabase.from('menu_toppings').select('id,nombre,emoji,precio_extra,precio_surcharge').order('orden'),
+      ]);
+      if (prodRes.data) {
+        setMenuConfig({
+          basePrice: Number(prodRes.data.precio_base),
+          freeToppingsLimit: Number(prodRes.data.free_toppings_limit),
+        });
+      }
+      if (topRes.data) {
+        setMenuToppings(topRes.data.map((t: any) => ({
+          id: t.id,
+          nombre: t.nombre,
+          emoji: t.emoji || '',
+          precio_extra: Number(t.precio_extra ?? 0),
+          precio_surcharge: Number(t.precio_surcharge ?? 0),
+        })));
+      }
+    })();
+
     const sub = supabase.channel('pedidos_live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => fetchPedidos())
       .subscribe();
@@ -97,7 +141,6 @@ export default function TicketsPage() {
 
   const act = async (type: Exclude<DialogType, null>, ticket: Pedido) => {
     setWorking(true);
-    // Optimistic: remove or update locally right away
     if (type === 'delete') {
       setPedidos(prev => prev.filter(p => p.id !== ticket.id));
     } else {
@@ -105,12 +148,10 @@ export default function TicketsPage() {
       setPedidos(prev => prev.map(p => p.id === ticket.id ? { ...p, estado: nextEstado } : p));
     }
     setDialog(null);
-    // Persist to DB
     if (type === 'confirm') await supabase.from('pedidos').update({ estado: 'pendiente' }).eq('id', ticket.id);
     else if (type === 'ready')   await supabase.from('pedidos').update({ estado: 'para_entregar' }).eq('id', ticket.id);
     else if (type === 'deliver') await supabase.from('pedidos').update({ estado: 'entregado' }).eq('id', ticket.id);
     else if (type === 'delete')  await supabase.from('pedidos').delete().eq('id', ticket.id);
-    // Refetch to stay in sync
     await fetchPedidos();
     setWorking(false);
   };
@@ -119,6 +160,78 @@ export default function TicketsPage() {
     e.stopPropagation();
     setDetail(null);
     setDialog({ type, ticket });
+  };
+
+  const openDetail = (ticket: Pedido) => {
+    setDetail(ticket);
+    setIsEditing(false);
+    setEditDraft(null);
+    setOtro('');
+  };
+
+  const startEdit = () => {
+    if (!detailTicket) return;
+    // Base ingredients (first split group, unique for same mode)
+    const baseIngs = splitIngredients(detailTicket.ingredientes, detailTicket.cantidad_burritos)[0] ?? [];
+    // Append extra ingredient names so they show as selected in the mini-menu
+    const extraNames = (detailTicket.extras ?? []).map((e: Extra) => e.nombre);
+    // Avoid duplicates in case extras are already in ingredientes somehow
+    const allIngs = [...baseIngs, ...extraNames.filter((n: string) => !baseIngs.includes(n))];
+    setEditDraft({ ...detailTicket, ingredientes: allIngs });
+    setIsEditing(true);
+    setOtro('');
+  };
+
+  const toggleIngrediente = (ing: string) => {
+    if (!editDraft) return;
+    const has = editDraft.ingredientes.includes(ing);
+    const newIngs = has
+      ? editDraft.ingredientes.filter(i => i !== ing)
+      : [...editDraft.ingredientes, ing];
+    const newTotal = calcTotal(newIngs, editDraft.cantidad_burritos, menuToppings, menuConfig);
+    setEditDraft(d => d ? { ...d, ingredientes: newIngs, total: Number(newTotal.toFixed(2)) } : d);
+  };
+
+  const addOtro = () => {
+    const trimmed = otroIngrediente.trim();
+    if (!trimmed || !editDraft) return;
+    if (!editDraft.ingredientes.includes(trimmed)) {
+      setEditDraft(d => d ? { ...d, ingredientes: [...d.ingredientes, trimmed] } : d);
+    }
+    setOtro('');
+  };
+
+  const saveEdit = async () => {
+    if (!editDraft) return;
+    setSaving(true);
+
+    // Recalculate extras column: ingredients beyond freeToppingsLimit
+    const extraIngs = editDraft.ingredientes.slice(menuConfig.freeToppingsLimit);
+    const newExtras = extraIngs.map((nom: string) => {
+      const t = menuToppings.find(to => to.nombre === nom);
+      return { nombre: nom, precio: t?.precio_extra ?? 0 };
+    });
+    // Base ingredients = everything within the free limit
+    const baseIngs = editDraft.ingredientes.slice(0, menuConfig.freeToppingsLimit);
+
+    const { error } = await supabase.from('pedidos').update({
+      cliente_nombre: editDraft.cliente_nombre,
+      cliente_telefono: editDraft.cliente_telefono,
+      cliente_direccion: editDraft.cliente_direccion,
+      dia_entrega: editDraft.dia_entrega,
+      cantidad_burritos: editDraft.cantidad_burritos,
+      total: editDraft.total,
+      ingredientes: baseIngs,
+      extras: newExtras,
+    }).eq('id', editDraft.id);
+
+    if (!error) {
+      await fetchPedidos();
+      setDetail({ ...editDraft, ingredientes: baseIngs, extras: newExtras });
+      setIsEditing(false);
+      setEditDraft(null);
+    }
+    setSaving(false);
   };
 
   if (checking) return null;
@@ -130,14 +243,27 @@ export default function TicketsPage() {
     const matchDay = !dayFilter || p.dia_entrega?.toUpperCase().includes(dayFilter.toUpperCase());
     return matchSearch && matchDay;
   });
+
   const byEstado = (e: string) => filtered.filter(p => p.estado === e);
+  const countBy  = (e: string) => filtered.filter(p => p.estado === e).length;
 
   const DAY_FILTERS = ['VIERNES', 'SÁBADO', 'DOMINGO'];
+
+  const TABS: { key: TabType; label: string; estado?: string; color: string }[] = [
+    { key: 'all',           label: 'Todos',          color: 'var(--text-muted)' },
+    { key: 'no_confirmado', label: 'Por Confirmar',  estado: 'no_confirmado', color: 'var(--warning)' },
+    { key: 'pendiente',     label: 'En Cocina',      estado: 'pendiente',     color: 'var(--accent)'  },
+    { key: 'para_entregar', label: 'Para Entregar',  estado: 'para_entregar', color: 'var(--success)' },
+  ];
+
+  const activeTickets = activeTab === 'all' ? filtered : byEstado(activeTab);
+
+  const currentTab = TABS.find(t => t.key === activeTab)!;
 
   return (
     <AppShell user={session?.user}>
       {/* Topbar */}
-      <div className="topbar">
+      <div className="topbar" style={{ flexWrap: 'wrap', height: 'auto', minHeight: 'var(--topbar-h)', gap: 8, padding: '8px 20px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="topbar-page-name">TICKETS</span>
@@ -145,9 +271,9 @@ export default function TicketsPage() {
           </div>
           <span className="topbar-subtitle">Live Kitchen Monitor</span>
         </div>
-        <div className="topbar-actions">
+        <div className="topbar-actions" style={{ flexWrap: 'wrap', gap: 8 }}>
           {/* Day filter chips */}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             {(['TODOS', ...DAY_FILTERS]).map(day => {
               const active = day === 'TODOS' ? !dayFilter : dayFilter === day;
               return (
@@ -155,13 +281,8 @@ export default function TicketsPage() {
                   key={day}
                   onClick={() => setDayFilter(day === 'TODOS' ? null : day)}
                   style={{
-                    padding: '5px 12px',
-                    borderRadius: 4,
-                    fontSize: '0.65rem',
-                    fontWeight: 800,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    cursor: 'pointer',
+                    padding: '5px 12px', borderRadius: 4, fontSize: '0.65rem', fontWeight: 800,
+                    letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
                     transition: 'all 0.15s',
                     border: active ? 'none' : '1px solid rgba(255,255,255,0.1)',
                     background: active ? 'var(--accent)' : 'transparent',
@@ -180,96 +301,329 @@ export default function TicketsPage() {
         </div>
       </div>
 
-      {/* Kanban */}
-      <div className="page">
-        <div className="kanban">
-          <KanbanCol title="Por Confirmar" color="yellow" tickets={byEstado('no_confirmado')} onOpen={setDetail}
-            actions={t => (
-              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
-                <ActionBtn label="Rechazar"  icon={<X size={12} />}    danger onClick={e => openDialog('delete', t, e)} />
-                <ActionBtn label="Confirmar" icon={<Check size={12} />} primary onClick={e => openDialog('confirm', t, e)} style={{ flex: 2 }} />
-              </div>
-            )}
-          />
-          <KanbanCol title="En Cocina" color="red" tickets={byEstado('pendiente')} onOpen={setDetail} variant="hot"
-            actions={t => (
-              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
-                <ActionBtn label="Cancelar"  icon={<Trash2 size={12} />}  danger onClick={e => openDialog('delete', t, e)} />
-                <ActionBtn label="Listo"     icon={<Check size={12} />}   muted  onClick={e => openDialog('ready', t, e)} style={{ flex: 2 }} />
-              </div>
-            )}
-          />
-          <KanbanCol title="Para Entregar" color="green" tickets={byEstado('para_entregar')} onOpen={setDetail} variant="ready"
-            actions={t => (
-              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
-                <ActionBtn label="Cancelar"  icon={<Trash2 size={12} />}  danger  onClick={e => openDialog('delete', t, e)} />
-                <ActionBtn label="Entregar"  icon={<Check size={12} />}   success onClick={e => openDialog('deliver', t, e)} style={{ flex: 2 }} />
-              </div>
-            )}
-          />
-        </div>
+      {/* ── Status Tabs ── */}
+      <div style={{
+        display: 'flex', gap: 0, borderBottom: '1px solid rgba(255,255,255,0.06)',
+        background: 'var(--surface)', overflowX: 'auto',
+      }}>
+        {TABS.map(tab => {
+          const count = tab.estado ? countBy(tab.estado) : filtered.length;
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 8,
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                borderBottom: isActive ? `2px solid ${tab.color}` : '2px solid transparent',
+                color: isActive ? tab.color : 'var(--text-dim)',
+                fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.08em',
+                textTransform: 'uppercase', transition: 'all 0.15s', whiteSpace: 'nowrap',
+                marginBottom: '-1px',
+              }}
+            >
+              {tab.label}
+              {count > 0 && (
+                <span style={{
+                  background: isActive ? tab.color : 'var(--surface-max)',
+                  color: isActive ? (tab.color === 'var(--success)' ? '#111' : '#fff') : 'var(--text-muted)',
+                  fontSize: '0.6rem', fontWeight: 900,
+                  padding: '1px 6px', borderRadius: 99,
+                }}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── Detail Modal ── */}
+      {/* ── Content ── */}
+      <div className="page">
+        {activeTab === 'all' ? (
+          /* Kanban */
+          <div className="kanban">
+            <KanbanCol title="Por Confirmar" color="yellow" tickets={byEstado('no_confirmado')} onOpen={openDetail}
+              actions={t => (
+                <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                  <ActionBtn label="Rechazar"  icon={<X size={12} />}    danger onClick={e => openDialog('delete', t, e)} />
+                  <ActionBtn label="Confirmar" icon={<Check size={12} />} primary onClick={e => openDialog('confirm', t, e)} style={{ flex: 2 }} />
+                </div>
+              )}
+            />
+            <KanbanCol title="En Cocina" color="red" tickets={byEstado('pendiente')} onOpen={openDetail} variant="hot"
+              actions={t => (
+                <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                  <ActionBtn label="Cancelar" icon={<Trash2 size={12} />} danger onClick={e => openDialog('delete', t, e)} />
+                  <ActionBtn label="Listo"    icon={<Check size={12} />}  muted  onClick={e => openDialog('ready', t, e)} style={{ flex: 2 }} />
+                </div>
+              )}
+            />
+            <KanbanCol title="Para Entregar" color="green" tickets={byEstado('para_entregar')} onOpen={openDetail} variant="ready"
+              actions={t => (
+                <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                  <ActionBtn label="Cancelar" icon={<Trash2 size={12} />} danger   onClick={e => openDialog('delete', t, e)} />
+                  <ActionBtn label="Entregar" icon={<Check size={12} />}  success  onClick={e => openDialog('deliver', t, e)} style={{ flex: 2 }} />
+                </div>
+              )}
+            />
+          </div>
+        ) : (
+          /* Single column list */
+          <div style={{ maxWidth: 600 }}>
+            {activeTickets.length === 0 ? (
+              <div style={{ color: 'var(--text-dim)', fontSize: '0.72rem', textAlign: 'center', padding: '60px 0', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
+                Sin tickets en esta categoría
+              </div>
+            ) : (
+              activeTickets.map(p => {
+                const burritos = splitIngredients(p.ingredientes, p.cantidad_burritos);
+                const actionsMap: Record<string, React.ReactNode> = {
+                  no_confirmado: (
+                    <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                      <ActionBtn label="Rechazar"  icon={<X size={12} />}    danger onClick={e => openDialog('delete', p, e)} />
+                      <ActionBtn label="Confirmar" icon={<Check size={12} />} primary onClick={e => openDialog('confirm', p, e)} style={{ flex: 2 }} />
+                    </div>
+                  ),
+                  pendiente: (
+                    <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                      <ActionBtn label="Cancelar" icon={<Trash2 size={12} />} danger onClick={e => openDialog('delete', p, e)} />
+                      <ActionBtn label="Listo"    icon={<Check size={12} />}  muted  onClick={e => openDialog('ready', p, e)} style={{ flex: 2 }} />
+                    </div>
+                  ),
+                  para_entregar: (
+                    <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                      <ActionBtn label="Cancelar" icon={<Trash2 size={12} />} danger   onClick={e => openDialog('delete', p, e)} />
+                      <ActionBtn label="Entregar" icon={<Check size={12} />}  success  onClick={e => openDialog('deliver', p, e)} style={{ flex: 2 }} />
+                    </div>
+                  ),
+                };
+                return (
+                  <div key={p.id} className={`ticket-card ${p.estado === 'pendiente' ? 'hot' : p.estado === 'para_entregar' ? 'ready' : ''}`}
+                    style={{ cursor: 'pointer', marginBottom: 12 }} onClick={() => openDetail(p)}>
+                    <div className="ticket-header">
+                      <span className="ticket-code">{p.codigo_ticket || '#----'}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="ticket-total">${Number(p.total).toFixed(2)}</span>
+                        <ChevronRight size={13} color="var(--text-dim)" />
+                      </div>
+                    </div>
+                    <div className="ticket-name">{p.cliente_nombre}</div>
+                    {burritos.map((ings, idx) => (
+                      <div key={idx} style={{ marginBottom: 6 }}>
+                        <div className="ticket-item-pill">
+                          <span>{p.cantidad_burritos === 1 ? `${p.cantidad_burritos}x` : `${idx + 1}/${p.cantidad_burritos}`}</span>
+                          🌯 BURRITO
+                        </div>
+                        <div className="ticket-ingredients" style={{ marginTop: 3 }}>
+                          {ings.slice(0, 5).join(' · ')}{ings.length > 5 ? ` +${ings.length - 5}` : ''}
+                        </div>
+                      </div>
+                    ))}
+                    {p.extras?.length > 0 && (
+                      <div style={{ fontSize: '0.65rem', color: 'var(--warning)', marginBottom: 6 }}>
+                        ✨ {p.extras.map(e => e.nombre).join(', ')}
+                      </div>
+                    )}
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 10, marginTop: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.63rem', color: 'var(--text-dim)', marginBottom: 8 }}>
+                        <Clock size={11} /> {p.bloque_horario} · {p.dia_entrega}
+                      </div>
+                      {actionsMap[p.estado]}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Detail / Edit Modal ── */}
       {detailTicket && (
-        <div className="modal-overlay" onClick={() => setDetail(null)}>
-          <div className="modal-box" style={{ maxWidth: 520, maxHeight: '88vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { setDetail(null); setIsEditing(false); }}>
+          <div className="modal-box" style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
               <div>
                 <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.6rem', color: 'var(--accent)', letterSpacing: '0.06em', lineHeight: 1 }}>
                   {detailTicket.codigo_ticket}
                 </div>
                 <div style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 2 }}>
-                  Detalle del Pedido
+                  {isEditing ? 'Editando pedido' : 'Detalle del Pedido'}
                 </div>
               </div>
-              <button onClick={() => setDetail(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', paddingTop: 4 }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Info */}
-            {[
-              { icon: '🗓️', text: `Para entregar el: ${detailTicket.dia_entrega} (${detailTicket.bloque_horario})` },
-              { icon: '👤', text: `Nombre: ${detailTicket.cliente_nombre}` },
-              { icon: '📞', text: `Teléfono: ${detailTicket.cliente_telefono || '—'}` },
-              { icon: '📍', text: `Dirección: ${detailTicket.cliente_direccion || '—'}` },
-              { icon: '📦', text: `Cantidad: ${detailTicket.cantidad_burritos} burrito${detailTicket.cantidad_burritos > 1 ? 's' : ''}` },
-            ].map(({ icon, text }, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 8, fontSize: '0.82rem', color: 'var(--text)', alignItems: 'flex-start' }}>
-                <span style={{ flexShrink: 0 }}>{icon}</span>
-                <span style={{ color: 'var(--text-muted)' }}>{text}</span>
-              </div>
-            ))}
-
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, fontSize: '0.82rem' }}>
-              <span>💵</span>
-              <span style={{ color: 'var(--text-muted)' }}>Total a pagar: </span>
-              <span style={{ fontFamily: 'Bebas Neue', fontSize: '1.1rem', color: 'var(--success)' }}>${Number(detailTicket.total).toFixed(2)}</span>
-            </div>
-
-            <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '4px 0 20px' }} />
-
-            {/* Burritos */}
-            {splitIngredients(detailTicket.ingredientes, detailTicket.cantidad_burritos).map((ings, idx) => (
-              <div key={idx} style={{ marginBottom: 14 }}>
-                <div style={{ fontFamily: 'Bebas Neue', fontSize: '0.9rem', color: 'var(--accent)', letterSpacing: '0.08em', marginBottom: 5 }}>
-                  🌯 {detailTicket.cantidad_burritos === 1 ? 'Ingredientes:' : `Burrito ${idx + 1}:`}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.7, paddingLeft: 24 }}>
-                  {ings.length > 0 ? ings.join(', ') + '.' : '—'}
-                </div>
-                {/* Extras only once (on single burrito or last) */}
-                {idx === detailTicket.cantidad_burritos - 1 && detailTicket.extras?.length > 0 && (
-                  <div style={{ fontSize: '0.75rem', color: 'var(--warning)', paddingLeft: 24, marginTop: 4 }}>
-                    ✨ Extras: {detailTicket.extras.map(e => `${e.nombre} (+$${Number(e.precio).toFixed(2)})`).join(', ')}
-                  </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {!isEditing && (
+                  <button onClick={startEdit} title="Editar pedido"
+                    style={{ background: 'var(--surface-max)', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em' }}>
+                    <Edit2 size={13} /> EDITAR
+                  </button>
                 )}
+                <button onClick={() => { setDetail(null); setIsEditing(false); }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', paddingTop: 4 }}>
+                  <X size={20} />
+                </button>
               </div>
-            ))}
+            </div>
 
+            {isEditing && editDraft ? (
+              /* ── Edit Mode ── */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
+                {/* Customer fields */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {[
+                    { label: 'Nombre', key: 'cliente_nombre' as const },
+                    { label: 'Teléfono', key: 'cliente_telefono' as const },
+                    { label: 'Dirección', key: 'cliente_direccion' as const },
+                  ].map(({ label, key }) => (
+                    <div key={key} className="field" style={key === 'cliente_direccion' ? { gridColumn: '1/-1' } : undefined}>
+                      <label>{label}</label>
+                      <input value={(editDraft as any)[key]} onChange={e => setEditDraft(d => d ? { ...d, [key]: e.target.value } : d)} />
+                    </div>
+                  ))}
 
+                  <div className="field">
+                    <label>Día entrega</label>
+                    <select value={editDraft.dia_entrega} onChange={e => setEditDraft(d => d ? { ...d, dia_entrega: e.target.value } : d)}>
+                      {['VIERNES','SÁBADO','DOMINGO'].map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="field">
+                    <label>Cantidad burritos</label>
+                    <input type="number" min={1} value={editDraft.cantidad_burritos}
+                      onChange={e => setEditDraft(d => d ? { ...d, cantidad_burritos: Number(e.target.value) } : d)} />
+                  </div>
+
+                  <div className="field" style={{ gridColumn: '1/-1' }}>
+                    <label>Total ($)</label>
+                    <input type="number" step="0.01" min={0} value={editDraft.total}
+                      onChange={e => setEditDraft(d => d ? { ...d, total: Number(e.target.value) } : d)} />
+                  </div>
+                </div>
+
+                {/* Ingredient mini-menu */}
+                <div>
+                  <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>
+                    Ingredientes — {editDraft.ingredientes.length} seleccionados
+                    &nbsp;·&nbsp;
+                    <span style={{ color: 'var(--success)', fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>
+                      ${editDraft.total.toFixed(2)}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                    {menuToppings.map(t => {
+                      const active = editDraft.ingredientes.includes(t.nombre);
+                      const showSurcharge = !active && t.precio_surcharge > 0 && editDraft.ingredientes.length < menuConfig.freeToppingsLimit;
+                      const showExtra = !active && t.precio_extra > 0 && editDraft.ingredientes.length >= menuConfig.freeToppingsLimit;
+                      return (
+                        <button key={t.id} onClick={() => toggleIngrediente(t.nombre)} style={{
+                          padding: '7px 8px', borderRadius: 6, fontSize: '0.67rem', fontWeight: 700,
+                          textAlign: 'center', cursor: 'pointer', transition: 'all 0.12s',
+                          background: active ? 'rgba(204,0,0,0.15)' : 'var(--surface-max)',
+                          border: active ? '1px solid var(--accent)' : '1px solid transparent',
+                          color: active ? '#fff' : 'var(--text-muted)',
+                        }}>
+                          {active && <Check size={9} style={{ display: 'inline', marginRight: 3 }} />}
+                          {t.emoji && <span style={{ marginRight: 3 }}>{t.emoji}</span>}
+                          {t.nombre}
+                          {showSurcharge && (
+                            <span style={{ display: 'block', fontSize: '0.55rem', color: 'var(--warning)', marginTop: 1 }}>+${t.precio_surcharge.toFixed(2)}</span>
+                          )}
+                          {showExtra && (
+                            <span style={{ display: 'block', fontSize: '0.55rem', color: 'var(--success)', marginTop: 1 }}>+${t.precio_extra.toFixed(2)}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Ingredientes del pedido que no están en el menú actual (personalizados) */}
+                  {editDraft.ingredientes
+                    .filter((i: string) => !menuToppings.some(t => t.nombre === i))
+                    .map((ing: string) => (
+                      <button key={ing} onClick={() => toggleIngrediente(ing)} style={{
+                        marginTop: 6, padding: '7px 8px', borderRadius: 6, fontSize: '0.67rem', fontWeight: 700,
+                        cursor: 'pointer', transition: 'all 0.12s', width: '100%', textAlign: 'left',
+                        background: 'rgba(204,0,0,0.15)', border: '1px solid var(--accent)', color: '#fff',
+                      }}>
+                        <Check size={9} style={{ display: 'inline', marginRight: 3 }} /> {ing} (personalizado)
+                      </button>
+                    ))}
+
+                  {/* Otro */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                    <input
+                      placeholder="Otro ingrediente..."
+                      value={otroIngrediente}
+                      onChange={e => setOtro(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && addOtro()}
+                      style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--surface-max)', borderRadius: 6, padding: '7px 10px', fontSize: '0.75rem', color: 'var(--text)', outline: 'none' }}
+                    />
+                    <button onClick={addOtro} style={{
+                      padding: '7px 14px', borderRadius: 6, background: 'var(--surface-max)', border: 'none',
+                      color: 'var(--text)', fontSize: '0.7rem', fontWeight: 800, cursor: 'pointer',
+                    }}>+ AÑADIR</button>
+                  </div>
+                </div>
+
+                {/* Save / Cancel */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                  <button className="btn btn-secondary" style={{ flex: 1 }}
+                    onClick={() => { setIsEditing(false); setEditDraft(null); }} disabled={saving}>
+                    Cancelar
+                  </button>
+                  <button className="btn" style={{ flex: 1, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', gap: 6 }}
+                    onClick={saveEdit} disabled={saving}>
+                    <Save size={13} /> {saving ? 'Guardando...' : 'Guardar cambios'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* ── View Mode ── */
+              <>
+                {[
+                  { icon: '🗓️', text: `Para entregar el: ${detailTicket.dia_entrega} (${detailTicket.bloque_horario})` },
+                  { icon: '👤', text: `Nombre: ${detailTicket.cliente_nombre}` },
+                  { icon: '📞', text: `Teléfono: ${detailTicket.cliente_telefono || '—'}` },
+                  { icon: '📍', text: `Dirección: ${detailTicket.cliente_direccion || '—'}` },
+                  { icon: '📦', text: `Cantidad: ${detailTicket.cantidad_burritos} burrito${detailTicket.cantidad_burritos > 1 ? 's' : ''}` },
+                ].map(({ icon, text }, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 8, fontSize: '0.82rem', color: 'var(--text)', alignItems: 'flex-start' }}>
+                    <span style={{ flexShrink: 0 }}>{icon}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{text}</span>
+                  </div>
+                ))}
+
+                <div style={{ display: 'flex', gap: 10, marginBottom: 20, fontSize: '0.82rem' }}>
+                  <span>💵</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Total a pagar: </span>
+                  <span style={{ fontFamily: 'Bebas Neue', fontSize: '1.1rem', color: 'var(--success)' }}>${Number(detailTicket.total).toFixed(2)}</span>
+                </div>
+
+                <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '4px 0 20px' }} />
+
+                {splitIngredients(detailTicket.ingredientes, detailTicket.cantidad_burritos).map((ings, idx) => (
+                  <div key={idx} style={{ marginBottom: 14 }}>
+                    <div style={{ fontFamily: 'Bebas Neue', fontSize: '0.9rem', color: 'var(--accent)', letterSpacing: '0.08em', marginBottom: 5 }}>
+                      🌯 {detailTicket.cantidad_burritos === 1 ? 'Ingredientes:' : `Burrito ${idx + 1}:`}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.7, paddingLeft: 24 }}>
+                      {ings.length > 0 ? ings.join(', ') + '.' : '—'}
+                    </div>
+                    {idx === detailTicket.cantidad_burritos - 1 && detailTicket.extras?.length > 0 && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--warning)', paddingLeft: 24, marginTop: 4 }}>
+                        ✨ Extras: {detailTicket.extras.map(e => `${e.nombre} (+$${Number(e.precio).toFixed(2)})`).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -347,7 +701,7 @@ function ActionBtn({ label, icon, danger, primary, success, muted, onClick, styl
   danger?: boolean; primary?: boolean; success?: boolean; muted?: boolean;
   onClick: (e: React.MouseEvent) => void; style?: React.CSSProperties;
 }) {
-  const bg = danger ? 'transparent' : primary ? 'var(--accent)' : success ? 'var(--success)' : 'var(--surface-max)';
+  const bg  = danger ? 'transparent' : primary ? 'var(--accent)' : success ? 'var(--success)' : 'var(--surface-max)';
   const col = danger ? 'var(--danger)' : primary ? '#fff' : success ? '#111' : 'var(--text)';
   const border = danger ? '1px solid rgba(239,68,68,0.25)' : 'none';
   return (
@@ -359,10 +713,10 @@ function ActionBtn({ label, icon, danger, primary, success, muted, onClick, styl
 
 // ── ConfirmDialog ─────────────────────────────────────────────
 const DIALOGS: Record<Exclude<DialogType, null>, { title: string; msg: string; btnLabel: string; btnBg: string; btnColor?: string }> = {
-  confirm: { title: '¿Confirmar pedido?',   msg: 'Pasará a EN COCINA.',                          btnLabel: 'Sí, confirmar', btnBg: 'var(--accent)' },
-  ready:   { title: '¿Marcar como listo?',  msg: 'Pasará a PARA ENTREGAR.',                       btnLabel: 'Sí, está listo', btnBg: 'var(--success)', btnColor: '#111' },
-  deliver: { title: '¿Marcar como entregado?', msg: 'Se quitará del tablero y se registrará como venta.', btnLabel: 'Sí, entregar', btnBg: 'var(--success)', btnColor: '#111' },
-  delete:  { title: '¿Eliminar este pedido?',  msg: 'Se eliminará permanentemente. Esta acción no se puede deshacer.', btnLabel: 'Sí, eliminar', btnBg: 'var(--danger)' },
+  confirm: { title: '¿Confirmar pedido?',      msg: 'Pasará a EN COCINA.',                                                          btnLabel: 'Sí, confirmar', btnBg: 'var(--accent)' },
+  ready:   { title: '¿Marcar como listo?',     msg: 'Pasará a PARA ENTREGAR.',                                                      btnLabel: 'Sí, está listo', btnBg: 'var(--success)', btnColor: '#111' },
+  deliver: { title: '¿Marcar como entregado?', msg: 'Se quitará del tablero y se registrará como venta.',                           btnLabel: 'Sí, entregar',  btnBg: 'var(--success)', btnColor: '#111' },
+  delete:  { title: '¿Eliminar este pedido?',  msg: 'Se eliminará permanentemente. Esta acción no se puede deshacer.',              btnLabel: 'Sí, eliminar',  btnBg: 'var(--danger)' },
 };
 
 function ConfirmDialog({ type, ticket, working, onCancel, onConfirm }: {

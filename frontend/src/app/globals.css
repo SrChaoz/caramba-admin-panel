@@ -861,12 +861,40 @@ input, select, textarea { font-family: var(--font-body); outline: none; }
   .bottom-nav { display: block; }
   .kanban { grid-template-columns: 1fr; }
   .inventory-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Topbar adapts to wrap */
+  .topbar {
+    height: auto;
+    min-height: var(--topbar-h);
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .topbar-search {
+    flex: 1;
+    min-width: 160px;
+    width: auto;
+  }
 }
 
 @media (max-width: 640px) {
-  .page { padding: 16px; }
-  .topbar { padding: 0 16px; }
+  .page { padding: 12px; }
+  .topbar { padding: 8px 12px; }
   .topbar-search { display: none; }
   .inventory-grid { grid-template-columns: 1fr; }
   .metric-value { font-size: 2rem; }
+  .modal-box { padding: 20px; }
+
+  /* Keep ticket cards readable on small screens */
+  .ticket-card { padding: 12px; }
+  .ticket-code { font-size: 1rem; }
+  .ticket-name { font-size: 0.75rem; }
+  .ticket-ingredients { font-size: 0.65rem; }
 }
