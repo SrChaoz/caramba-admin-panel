@@ -617,7 +617,7 @@ export default function TicketsPage() {
                     </div>
                     {idx === detailTicket.cantidad_burritos - 1 && detailTicket.extras?.length > 0 && (
                       <div style={{ fontSize: '0.75rem', color: 'var(--warning)', paddingLeft: 24, marginTop: 4 }}>
-                        ✨ Extras: {detailTicket.extras.map(e => `${e.nombre} (+$${Number(e.precio).toFixed(2)})`).join(', ')}
+                        ✨ Extras: {detailTicket.extras.map(e => e.precio > 0 ? `${e.nombre} (+$${Number(e.precio).toFixed(2)})` : e.nombre).join(', ')}
                       </div>
                     )}
                   </div>

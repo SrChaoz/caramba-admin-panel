@@ -7,7 +7,7 @@ import AppShell from '@/components/AppShell';
 import { Search, Plus, Pencil, X, Save, Settings, Layers, Hash } from 'lucide-react';
 
 type Categoria = { id: string; nombre: string; es_requerido: boolean; orden: number; producto_id: string; };
-type Topping = { id: string; nombre: string; emoji: string; categoria_id: string; exclusive_group: string | null; precio_extra: number; disponible: boolean; orden: number; };
+type Topping = { id: string; nombre: string; emoji: string; categoria_id: string; exclusive_group: string | null; precio_extra: number; precio_surcharge: number; precio_proteina_combo: number; disponible: boolean; orden: number; oculto: boolean; };
 type Config = { min_toppings: number; free_toppings_limit: number; precio_base: number; whatsapp_phone: string; };
 
 type ModalState = 'crear_topping' | 'editar_topping' | 'crear_cat' | 'editar_cat' | null;
@@ -36,7 +36,10 @@ export default function MenuPage() {
   const [fEmoji, setFEmoji] = useState('');
   const [fCatId, setFCatId] = useState('');
   const [fPrecio, setFPrecio] = useState('0');
+  const [fSurcharge, setFSurcharge] = useState('0');
+  const [fComboPrice, setFComboPrice] = useState('0');
   const [fGroup, setFGroup] = useState('');
+  const [fOculto, setFOculto] = useState(false);
 
   // Form states Categoria
   const [fCatReq, setFCatReq] = useState(false);
@@ -97,13 +100,13 @@ export default function MenuPage() {
 
   // Abrir modals
   const openCrearTopping = () => {
-    setEditId(''); setFNombre(''); setFEmoji(''); setFPrecio('0'); setFGroup('');
+    setEditId(''); setFNombre(''); setFEmoji(''); setFPrecio('0'); setFSurcharge('0'); setFComboPrice('0'); setFGroup(''); setFOculto(false);
     setFCatId(categorias[0]?.id || '');
     setModal('crear_topping');
   };
   const openEditarTopping = (t: Topping) => {
     setEditId(t.id); setFNombre(t.nombre); setFEmoji(t.emoji || ''); 
-    setFPrecio(String(t.precio_extra)); setFGroup(t.exclusive_group || ''); setFCatId(t.categoria_id);
+    setFPrecio(String(t.precio_extra)); setFSurcharge(String(t.precio_surcharge)); setFComboPrice(String(t.precio_proteina_combo)); setFGroup(t.exclusive_group || ''); setFCatId(t.categoria_id); setFOculto(t.oculto || false);
     setModal('editar_topping');
   };
   
@@ -121,7 +124,11 @@ export default function MenuPage() {
     e.preventDefault();
     const payload = {
       nombre: fNombre, emoji: fEmoji, categoria_id: fCatId,
-      precio_extra: Number(fPrecio), exclusive_group: fGroup.trim() || null
+      precio_extra: Number(fPrecio), 
+      precio_surcharge: Number(fSurcharge),
+      precio_proteina_combo: Number(fComboPrice),
+      exclusive_group: fGroup.trim() || null,
+      oculto: fOculto
     };
 
     if (modal === 'crear_topping') {
@@ -229,9 +236,14 @@ export default function MenuPage() {
               >
                 <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: '1.8rem' }}>{t.emoji}</span>
+                    <span style={{ fontSize: '1.8rem', position: 'relative' }}>
+                      {t.emoji}
+                      {t.oculto && <span style={{ position: 'absolute', bottom: -5, right: -5, fontSize: '0.8rem', background: 'var(--surface)', padding: 2, borderRadius: '50%' }}>👁️‍🗨️</span>}
+                    </span>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '1rem', color: t.disponible ? 'var(--text)' : 'var(--text-muted)' }}>{t.nombre}</div>
+                      <div style={{ fontWeight: 600, fontSize: '1rem', color: t.disponible ? 'var(--text)' : 'var(--text-muted)' }}>
+                        {t.nombre} {t.oculto && <span className="chip" style={{ fontSize: '0.6rem', padding: '2px 4px' }}>OCULTO</span>}
+                      </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
                         {categorias.find(c => c.id === t.categoria_id)?.nombre || t.categoria_id}
                         {t.precio_extra > 0 && <span style={{ color: 'var(--accent)', fontWeight: 'bold', marginLeft: 6 }}>+${t.precio_extra.toFixed(2)}</span>}
@@ -353,13 +365,31 @@ export default function MenuPage() {
 
                 <div style={{ display: 'flex', gap: 16 }}>
                   <div className="field" style={{ flex: 1 }}>
-                    <label>Precio Extra ($)</label>
+                    <label>Precio Extra ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(como ingrediente extra &gt;8 toppings)</span></label>
                     <input type="number" step="0.05" min="0" required value={fPrecio} onChange={e => setFPrecio(e.target.value)} />
                   </div>
                   <div className="field" style={{ flex: 1 }}>
                     <label>Grupo de Exclusividad ID</label>
                     <input type="text" placeholder="Ej. arroz o meat (opcional)" value={fGroup} onChange={e => setFGroup(e.target.value)} />
                   </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Recargo Base ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(cuando es proteína única, ej. Carne +$0.50)</span></label>
+                    <input type="number" step="0.05" min="0" value={fSurcharge} onChange={e => setFSurcharge(e.target.value)} />
+                  </div>
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Precio Combo Proteína ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(cuando es 2da proteína, ej. Pollo +$1.00)</span></label>
+                    <input type="number" step="0.05" min="0" value={fComboPrice} onChange={e => setFComboPrice(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+                  <input type="checkbox" id="oculto" checked={fOculto} onChange={e => setFOculto(e.target.checked)} style={{ width: 18, height: 18 }} />
+                  <label htmlFor="oculto" style={{ cursor: 'pointer', margin: 0, fontWeight: 'bold', color: 'var(--warning, #f59e0b)' }}>
+                    Ocultar del menú web (Temporalmente inactivo)
+                  </label>
                 </div>
 
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Nota: Para el "Grupo de Exclusividad", si dos ingredientes tienen el mismo ID de exclusión (ej. "arroz"), no podrán ser seleccionados ambos a la vez de forma gratuita en el portal según las reglas base.</p>

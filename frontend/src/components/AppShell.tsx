@@ -4,17 +4,18 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
-  Ticket, Package, DollarSign, ReceiptText, Users, LogOut, Utensils
+  Ticket, Package, DollarSign, ReceiptText, Users, LogOut, Utensils, BarChart3, Tag
 } from 'lucide-react';
 
-
 const NAV = [
-  { href: '/tickets', label: 'Tickets',       icon: Ticket       },
-  { href: '/inventario', label: 'Inventario', icon: Package      },
+  { href: '/tickets', label: 'Pedidos',       icon: Ticket       },
   { href: '/menu',       label: 'Menú Web',   icon: Utensils     },
+  { href: '/promociones',label: 'Promociones',icon: Tag          },
   { href: '/finanzas',   label: 'Finanzas',   icon: DollarSign   },
   { href: '/gastos',     label: 'Gastos',     icon: ReceiptText  },
   { href: '/nomina',     label: 'Nómina / Pagos', icon: Users    },
+  { href: '/inventario', label: 'Inventario', icon: Package      },
+  { href: '/analiticas', label: 'Analíticas', icon: BarChart3    },
 ];
 
 export default function AppShell({ children, user }: { children: React.ReactNode; user?: { email?: string } }) {
