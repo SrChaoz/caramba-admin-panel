@@ -4,11 +4,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
-  Ticket, Package, DollarSign, ReceiptText, Users, LogOut, Utensils, BarChart3, Tag
+  Ticket, Package, DollarSign, ReceiptText, Users, LogOut, Utensils, BarChart3, Tag, Inbox
 } from 'lucide-react';
 
 const NAV = [
-  { href: '/tickets', label: 'Pedidos',       icon: Ticket       },
+  { href: '/caja',       label: 'Turno / Caja', icon: Inbox },
+  { href: '/tickets',    label: 'Pedidos',       icon: Ticket       },
   { href: '/menu',       label: 'Menú Web',   icon: Utensils     },
   { href: '/promociones',label: 'Promociones',icon: Tag          },
   { href: '/finanzas',   label: 'Finanzas',   icon: DollarSign   },

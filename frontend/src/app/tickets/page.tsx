@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
-import { Search, Clock, X, Check, ChevronRight, Phone, Calendar, Package, Trash2, Edit2, Save } from 'lucide-react';
+import { Search, Clock, X, Check, ChevronRight, Phone, Calendar, Package, Trash2, Edit2, Save, User, MapPin, CreditCard, Banknote, Star } from 'lucide-react';
 
 type Extra  = { nombre: string; precio: number };
 type Pedido = {
@@ -139,18 +139,21 @@ export default function TicketsPage() {
     return () => { supabase.removeChannel(sub); };
   }, [session, fetchPedidos]);
 
-  const act = async (type: Exclude<DialogType, null>, ticket: Pedido) => {
+  const act = async (type: Exclude<DialogType, null>, ticket: Pedido, payload?: any) => {
     setWorking(true);
     if (type === 'delete') {
       setPedidos(prev => prev.filter(p => p.id !== ticket.id));
     } else {
       const nextEstado = type === 'confirm' ? 'pendiente' : type === 'ready' ? 'para_entregar' : 'entregado';
-      setPedidos(prev => prev.map(p => p.id === ticket.id ? { ...p, estado: nextEstado } : p));
+      setPedidos(prev => prev.map(p => p.id === ticket.id ? { ...p, estado: nextEstado, metodo_pago: payload?.metodoPago || p.metodo_pago } : p));
     }
     setDialog(null);
     if (type === 'confirm') await supabase.from('pedidos').update({ estado: 'pendiente' }).eq('id', ticket.id);
     else if (type === 'ready')   await supabase.from('pedidos').update({ estado: 'para_entregar' }).eq('id', ticket.id);
-    else if (type === 'deliver') await supabase.from('pedidos').update({ estado: 'entregado' }).eq('id', ticket.id);
+    else if (type === 'deliver') {
+      const { data: sData } = await supabase.from('sesiones_caja').select('id').eq('estado', 'ABIERTA').single();
+      await supabase.from('pedidos').update({ estado: 'entregado', metodo_pago: payload?.metodoPago || ticket.metodo_pago, sesion_caja_id: sData ? sData.id : null }).eq('id', ticket.id);
+    }
     else if (type === 'delete')  await supabase.from('pedidos').delete().eq('id', ticket.id);
     await fetchPedidos();
     setWorking(false);
@@ -414,7 +417,7 @@ export default function TicketsPage() {
                       <div key={idx} style={{ marginBottom: 6 }}>
                         <div className="ticket-item-pill">
                           <span>{p.cantidad_burritos === 1 ? `${p.cantidad_burritos}x` : `${idx + 1}/${p.cantidad_burritos}`}</span>
-                          🌯 BURRITO
+                          <Package size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> BURRITO
                         </div>
                         <div className="ticket-ingredients" style={{ marginTop: 3 }}>
                           {ings.slice(0, 5).join(' · ')}{ings.length > 5 ? ` +${ings.length - 5}` : ''}
@@ -423,12 +426,12 @@ export default function TicketsPage() {
                     ))}
                     {p.extras?.length > 0 && (
                       <div style={{ fontSize: '0.65rem', color: 'var(--warning)', marginBottom: 6 }}>
-                        ✨ {p.extras.map(e => e.nombre).join(', ')}
+                        <Star size={10} style={{ display: 'inline', marginRight: 3, verticalAlign: 'text-bottom' }} /> {p.extras.map(e => e.nombre).join(', ')}
                       </div>
                     )}
                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 10, marginTop: 6 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.63rem', color: 'var(--text-dim)', marginBottom: 8 }}>
-                        <Clock size={11} /> {p.bloque_horario} · {p.dia_entrega}
+                        <Clock size={11} /> {p.bloque_horario} · {p.dia_entrega} {p.metodo_pago ? <><span style={{ margin: '0 4px' }}>·</span><CreditCard size={11} /> {p.metodo_pago}</> : ''}
                       </div>
                       {actionsMap[p.estado]}
                     </div>
@@ -587,11 +590,12 @@ export default function TicketsPage() {
               /* ── View Mode ── */
               <>
                 {[
-                  { icon: '🗓️', text: `Para entregar el: ${detailTicket.dia_entrega} (${detailTicket.bloque_horario})` },
-                  { icon: '👤', text: `Nombre: ${detailTicket.cliente_nombre}` },
-                  { icon: '📞', text: `Teléfono: ${detailTicket.cliente_telefono || '—'}` },
-                  { icon: '📍', text: `Dirección: ${detailTicket.cliente_direccion || '—'}` },
-                  { icon: '📦', text: `Cantidad: ${detailTicket.cantidad_burritos} burrito${detailTicket.cantidad_burritos > 1 ? 's' : ''}` },
+                  { icon: <Calendar size={14} />, text: `Para entregar el: ${detailTicket.dia_entrega} (${detailTicket.bloque_horario})` },
+                  { icon: <User size={14} />, text: `Nombre: ${detailTicket.cliente_nombre}` },
+                  { icon: <Phone size={14} />, text: `Teléfono: ${detailTicket.cliente_telefono || '—'}` },
+                  { icon: <MapPin size={14} />, text: `Dirección: ${detailTicket.cliente_direccion || '—'}` },
+                  { icon: <Package size={14} />, text: `Cantidad: ${detailTicket.cantidad_burritos} burrito${detailTicket.cantidad_burritos > 1 ? 's' : ''}` },
+                  { icon: <CreditCard size={14} />, text: `Método de pago: ${detailTicket.metodo_pago || 'Efectivo'}` },
                 ].map(({ icon, text }, i) => (
                   <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 8, fontSize: '0.82rem', color: 'var(--text)', alignItems: 'flex-start' }}>
                     <span style={{ flexShrink: 0 }}>{icon}</span>
@@ -600,7 +604,7 @@ export default function TicketsPage() {
                 ))}
 
                 <div style={{ display: 'flex', gap: 10, marginBottom: 20, fontSize: '0.82rem' }}>
-                  <span>💵</span>
+                  <Banknote size={15} color="var(--text-muted)" />
                   <span style={{ color: 'var(--text-muted)' }}>Total a pagar: </span>
                   <span style={{ fontFamily: 'Bebas Neue', fontSize: '1.1rem', color: 'var(--success)' }}>${Number(detailTicket.total).toFixed(2)}</span>
                 </div>
@@ -610,14 +614,14 @@ export default function TicketsPage() {
                 {splitIngredients(detailTicket.ingredientes, detailTicket.cantidad_burritos).map((ings, idx) => (
                   <div key={idx} style={{ marginBottom: 14 }}>
                     <div style={{ fontFamily: 'Bebas Neue', fontSize: '0.9rem', color: 'var(--accent)', letterSpacing: '0.08em', marginBottom: 5 }}>
-                      🌯 {detailTicket.cantidad_burritos === 1 ? 'Ingredientes:' : `Burrito ${idx + 1}:`}
+                      <Package size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> {detailTicket.cantidad_burritos === 1 ? 'Ingredientes:' : `Burrito ${idx + 1}:`}
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.7, paddingLeft: 24 }}>
                       {ings.length > 0 ? ings.join(', ') + '.' : '—'}
                     </div>
                     {idx === detailTicket.cantidad_burritos - 1 && detailTicket.extras?.length > 0 && (
                       <div style={{ fontSize: '0.75rem', color: 'var(--warning)', paddingLeft: 24, marginTop: 4 }}>
-                        ✨ Extras: {detailTicket.extras.map(e => e.precio > 0 ? `${e.nombre} (+$${Number(e.precio).toFixed(2)})` : e.nombre).join(', ')}
+                        <Star size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> Extras: {detailTicket.extras.map(e => e.precio > 0 ? `${e.nombre} (+$${Number(e.precio).toFixed(2)})` : e.nombre).join(', ')}
                       </div>
                     )}
                   </div>
@@ -629,7 +633,7 @@ export default function TicketsPage() {
       )}
 
       {/* ── Confirm Dialog ── */}
-      {dialog && <ConfirmDialog {...dialog} working={working} onCancel={() => setDialog(null)} onConfirm={() => act(dialog.type, dialog.ticket)} />}
+      {dialog && <ConfirmDialog {...dialog} working={working} onCancel={() => setDialog(null)} onConfirm={(p) => act(dialog.type, dialog.ticket, p)} />}
     </AppShell>
   );
 }
@@ -667,7 +671,7 @@ function KanbanCol({ title, color, tickets, actions, onOpen, variant = 'default'
                   <div key={idx} style={{ marginBottom: 6 }}>
                     <div className="ticket-item-pill">
                       <span>{p.cantidad_burritos === 1 ? `${p.cantidad_burritos}x` : `${idx + 1}/${p.cantidad_burritos}`}</span>
-                      🌯 BURRITO
+                      <Package size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> BURRITO
                     </div>
                     <div className="ticket-ingredients" style={{ marginTop: 3 }}>
                       {ings.slice(0, 5).join(' · ')}{ings.length > 5 ? ` +${ings.length - 5}` : ''}
@@ -677,13 +681,13 @@ function KanbanCol({ title, color, tickets, actions, onOpen, variant = 'default'
 
                 {p.extras?.length > 0 && (
                   <div style={{ fontSize: '0.65rem', color: 'var(--warning)', marginBottom: 6 }}>
-                    ✨ {p.extras.map(e => e.nombre).join(', ')}
+                    <Star size={10} style={{ display: 'inline', marginRight: 3, verticalAlign: 'text-bottom' }} /> {p.extras.map(e => e.nombre).join(', ')}
                   </div>
                 )}
 
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 10, marginTop: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.63rem', color: 'var(--text-dim)', marginBottom: 8 }}>
-                    <Clock size={11} /> {p.bloque_horario} · {p.dia_entrega}
+                    <Clock size={11} /> {p.bloque_horario} · {p.dia_entrega} {p.metodo_pago ? <><span style={{ margin: '0 4px' }}>·</span><CreditCard size={11} /> {p.metodo_pago}</> : ''}
                   </div>
                   {actions(p)}
                 </div>
@@ -721,9 +725,11 @@ const DIALOGS: Record<Exclude<DialogType, null>, { title: string; msg: string; b
 
 function ConfirmDialog({ type, ticket, working, onCancel, onConfirm }: {
   type: Exclude<DialogType, null>; ticket: Pedido; working: boolean;
-  onCancel: () => void; onConfirm: () => void;
+  onCancel: () => void; onConfirm: (payload?: any) => void;
 }) {
   const cfg = DIALOGS[type];
+  const [metodoPago, setMetodoPago] = useState(ticket.metodo_pago || 'Efectivo');
+
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-box" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
@@ -731,10 +737,27 @@ function ConfirmDialog({ type, ticket, working, onCancel, onConfirm }: {
         <div style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 700, marginBottom: 6 }}>
           {ticket.codigo_ticket} — {ticket.cliente_nombre}
         </div>
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.5 }}>{cfg.msg}</div>
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: type === 'deliver' ? 12 : 24, lineHeight: 1.5 }}>{cfg.msg}</div>
+        
+        {type === 'deliver' && (
+          <div style={{ marginBottom: 24, background: 'var(--surface)', padding: 12, borderRadius: 8 }}>
+            <label style={{ fontSize: '0.65rem', color: 'var(--text-dim)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6, display: 'block' }}>
+              Confirmar método de pago final:
+            </label>
+            <select
+              value={metodoPago}
+              onChange={e => setMetodoPago(e.target.value)}
+              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--surface-max)', color: 'var(--text)', padding: '8px 10px', borderRadius: 6, fontSize: '0.75rem', outline: 'none' }}
+            >
+              <option value="Efectivo">Efectivo</option>
+              <option value="Transferencia">Transferencia</option>
+            </select>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onCancel} disabled={working}>Cancelar</button>
-          <button className="btn" style={{ flex: 1, background: cfg.btnBg, color: cfg.btnColor ?? '#fff' }} onClick={onConfirm} disabled={working}>
+          <button className="btn" style={{ flex: 1, background: cfg.btnBg, color: cfg.btnColor ?? '#fff' }} onClick={() => onConfirm(type === 'deliver' ? { metodoPago } : undefined)} disabled={working}>
             {working ? 'Procesando...' : cfg.btnLabel}
           </button>
         </div>

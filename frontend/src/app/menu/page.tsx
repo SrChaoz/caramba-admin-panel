@@ -347,11 +347,11 @@ export default function MenuPage() {
                 <div style={{ display: 'flex', gap: 16 }}>
                   <div className="field" style={{ flex: 1 }}>
                     <label>Emoji</label>
-                    <input type="text" placeholder="🌮" required value={fEmoji} onChange={e => setFEmoji(e.target.value)} />
+                    <input type="text" placeholder="Emoji" required value={fEmoji} onChange={e => setFEmoji(e.target.value)} />
                   </div>
                   <div className="field" style={{ flex: 3 }}>
                     <label>Nombre a mostrar</label>
-                    <input type="text" placeholder="Pico de gallo" required value={fNombre} onChange={e => setFNombre(e.target.value)} />
+                    <input type="text" placeholder="Ej: Pico de gallo" required value={fNombre} onChange={e => setFNombre(e.target.value)} />
                   </div>
                 </div>
 
@@ -365,23 +365,19 @@ export default function MenuPage() {
 
                 <div style={{ display: 'flex', gap: 16 }}>
                   <div className="field" style={{ flex: 1 }}>
-                    <label>Precio Extra ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(como ingrediente extra &gt;8 toppings)</span></label>
+                    <label>Precio Extra ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(para &gt;8 ingredientes o 2da proteína)</span></label>
                     <input type="number" step="0.05" min="0" required value={fPrecio} onChange={e => setFPrecio(e.target.value)} />
                   </div>
                   <div className="field" style={{ flex: 1 }}>
                     <label>Grupo de Exclusividad ID</label>
-                    <input type="text" placeholder="Ej. arroz o meat (opcional)" value={fGroup} onChange={e => setFGroup(e.target.value)} />
+                    <input type="text" placeholder="Ej: arroz o meat (opcional)" value={fGroup} onChange={e => setFGroup(e.target.value)} />
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 16 }}>
                   <div className="field" style={{ flex: 1 }}>
-                    <label>Recargo Base ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(cuando es proteína única, ej. Carne +$0.50)</span></label>
+                    <label>Recargo Base ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(cuando es proteína inicial, ej. Carne +$0.50)</span></label>
                     <input type="number" step="0.05" min="0" value={fSurcharge} onChange={e => setFSurcharge(e.target.value)} />
-                  </div>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>Precio Combo Proteína ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(cuando es 2da proteína, ej. Pollo +$1.00)</span></label>
-                    <input type="number" step="0.05" min="0" value={fComboPrice} onChange={e => setFComboPrice(e.target.value)} />
                   </div>
                 </div>
 

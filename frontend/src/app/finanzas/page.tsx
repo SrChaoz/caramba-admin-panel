@@ -7,9 +7,8 @@ import AppShell from '@/components/AppShell';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-type Pedido    = { id: string; total: number; estado: string; dia_entrega: string; cliente_nombre: string; codigo_ticket: string; cantidad_burritos: number; fecha_pedido: string; };
-type Gasto     = { id: string; monto: number; pagado_de_caja: boolean; fecha: string; };
-type NominaRow = { id: string; monto_pagado: number; fecha_pago: string; empleado_nombre: string; };
+type Pedido = { id: string; total: number; estado: string; dia_entrega: string; cliente_nombre: string; codigo_ticket: string; cantidad_burritos: number; fecha_pedido: string; metodo_pago: string; };
+type Transaccion = { id: string; monto: number; fecha: string; descripcion: string; categorias_finanzas: { tipo: string }; };
 
 const PAGE_SIZE = 8;
 
@@ -36,11 +35,10 @@ export default function FinanzasPage() {
   const [ticketPage, setTicketPage] = useState(0);
 
   const [allPedidos, setAllPedidos] = useState<Pedido[]>([]);
-  const [allGastos,  setAllGastos]  = useState<Gasto[]>([]);
-  const [allNomina,  setAllNomina]  = useState<NominaRow[]>([]);
-  const [pedidos, setPedidos]       = useState<Pedido[]>([]);
-  const [gastos,  setGastos]        = useState<Gasto[]>([]);
-  const [nomina,  setNomina]        = useState<NominaRow[]>([]);
+  const [allTransacciones, setAllTransacciones] = useState<Transaccion[]>([]);
+  
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [transacciones, setTransacciones] = useState<Transaccion[]>([]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -50,14 +48,19 @@ export default function FinanzasPage() {
   }, [router]);
 
   const loadAll = useCallback(async () => {
-    const [{ data: p }, { data: g }, { data: n }] = await Promise.all([
+    const [{ data: p }, { data: t }] = await Promise.all([
       supabase.from('pedidos').select('*').eq('estado', 'entregado').order('fecha_pedido', { ascending: false }),
-      supabase.from('gastos_inversion').select('*').order('fecha', { ascending: false }),
-      supabase.from('nomina').select('*').order('fecha_pago', { ascending: false }),
+      supabase.from('transacciones').select('id, monto, fecha, descripcion, categorias_finanzas(tipo)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }),
     ]);
     if (p) setAllPedidos(p);
-    if (g) setAllGastos(g);
-    if (n) setAllNomina(n);
+    if (t) {
+      // Clean up the inner join format
+      const cleaned = (t as any[]).map(x => ({
+        ...x,
+        categorias_finanzas: Array.isArray(x.categorias_finanzas) ? x.categorias_finanzas[0] : x.categorias_finanzas
+      }));
+      setAllTransacciones(cleaned);
+    }
   }, []);
 
   useEffect(() => { if (session) loadAll(); }, [session, loadAll]);
@@ -65,27 +68,29 @@ export default function FinanzasPage() {
   useEffect(() => {
     const desde = new Date(fechaDesde + 'T00:00:00');
     const hasta  = new Date(fechaHasta  + 'T23:59:59');
-    setPedidos(allPedidos.filter(p => { const d = new Date(p.fecha_pedido); return d >= desde && d <= hasta; }));
-    setGastos(allGastos.filter(g   => { const d = new Date(g.fecha + 'T12:00:00'); return d >= desde && d <= hasta; }));
-    setNomina(allNomina.filter(n   => { const d = new Date(n.fecha_pago + 'T12:00:00'); return d >= desde && d <= hasta; }));
+    setPedidos(allPedidos.filter(p => { const d = new Date(p.fecha_pedido.slice(0, 10) + 'T12:00:00'); return d >= desde && d <= hasta; }));
+    setTransacciones(allTransacciones.filter(t => { const d = new Date(t.fecha.slice(0, 10) + 'T12:00:00'); return d >= desde && d <= hasta; }));
     setTicketPage(0);
-  }, [fechaDesde, fechaHasta, allPedidos, allGastos, allNomina]);
+  }, [fechaDesde, fechaHasta, allPedidos, allTransacciones]);
 
   if (checking) return null;
 
   // Period metrics
-  const totalVentas   = pedidos.reduce((s, p) => s + Number(p.total), 0);
-  const totalGastos   = gastos.reduce((s, g) => s + Number(g.monto), 0);
-  const totalNomina   = nomina.reduce((s, n) => s + Number(n.monto_pagado), 0);
+  const totalVentas = pedidos.reduce((s, p) => s + Number(p.total), 0);
+  const totalCOGS = transacciones.filter(t => t.categorias_finanzas?.tipo === 'COGS').reduce((s, t) => s + Number(t.monto), 0);
+  const totalOPEX = transacciones.filter(t => t.categorias_finanzas?.tipo === 'OPEX').reduce((s, t) => s + Number(t.monto), 0);
+  const totalNomina = transacciones.filter(t => t.categorias_finanzas?.tipo === 'NOMINA').reduce((s, t) => s + Number(t.monto), 0);
+  const totalGastos = totalCOGS + totalOPEX;
+  
   const gananciaBruta = totalVentas - totalGastos;
+  const utilidadNeta = gananciaBruta - totalNomina;
 
   // Historical metrics (all time)
-  const histVentas        = allPedidos.reduce((s, p) => s + Number(p.total), 0);
-  const histGastos        = allGastos.reduce((s, g) => s + Number(g.monto), 0);
+  const histVentas = allPedidos.reduce((s, p) => s + Number(p.total), 0);
+  const histGastos = allTransacciones.filter(t => t.categorias_finanzas?.tipo !== 'RETIRO DE DUEÑOS').reduce((s, t) => s + Number(t.monto), 0);
   const acumuladoHistorico = histVentas - histGastos;
-  const capitalEnCaja     = acumuladoHistorico; // mismo valor
 
-  const noDataInPeriod = pedidos.length === 0 && gastos.length === 0 && nomina.length === 0;
+  const noDataInPeriod = pedidos.length === 0 && transacciones.length === 0;
 
   // Chart data
   const dias = ['VIERNES', 'SÁBADO', 'DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES'];
@@ -116,12 +121,13 @@ export default function FinanzasPage() {
 
   return (
     <AppShell user={session?.user}>
-      {/* ── Topbar: solo title + period picker ── */}
+      {/* Topbar */}
       <div className="topbar" style={{ gap: 16 }}>
-        <span className="topbar-page-name" style={{ color: 'var(--accent)' }}>FINANZAS</span>
+        <span className="topbar-page-name" style={{ color: 'var(--accent)' }}>ESTADO DE</span>
+        <span style={{ color: 'var(--text-muted)', fontFamily: 'Bebas Neue', fontSize: '1.5rem', marginLeft: -8 }}> RESULTADOS (P&L)</span>
 
-        {/* Period picker — visible y bien proporcionado */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--surface-hi)', borderRadius: 8 }}>
+        {/* Period picker */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--surface-hi)', borderRadius: 8, marginLeft: 'auto' }}>
           <button
             onClick={() => shiftWeek(-1)}
             style={{ background: 'var(--surface-max)', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '10px 14px', borderRadius: '8px 0 0 8px', display: 'flex', alignItems: 'center' }}
@@ -155,19 +161,18 @@ export default function FinanzasPage() {
 
       <div className="page" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-        {/* ── 6 metric cards: 4 del período + 2 globales ── */}
+        {/* 6 metric cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          {/* Period */}
-          <MetricCard label="Total Ventas"        value={`$${totalVentas.toFixed(2)}`}    sub={`${pedidos.length} pedidos entregados`} />
-          <MetricCard label="Inversión / Gastos"  value={`-$${totalGastos.toFixed(2)}`}   sub={`${gastos.length} registros`} negative />
-          <MetricCard label="Ganancia Bruta"       value={`$${gananciaBruta.toFixed(2)}`}  highlight positive={gananciaBruta >= 0} />
-          <MetricCard label="Retiros / Nómina"    value={`-$${totalNomina.toFixed(2)}`}   sub={`${nomina.length} pagos`} negative />
-          {/* Historical — always visible */}
-          <MetricCard label="Acumulado Histórico" value={`$${acumuladoHistorico.toFixed(2)}`} sub="Toda la historia del negocio" globalBadge />
-          <MetricCard label="Capital en Caja"     value={`$${capitalEnCaja.toFixed(2)}`}   sub="Disponible para reinvertir" globalBadge positive={capitalEnCaja >= 0} />
+          <MetricCard label="Ingresos Totales Brutos" value={`$${totalVentas.toFixed(2)}`} sub={`${pedidos.length} pedidos`} positive={totalVentas > 0} />
+          <MetricCard label="COGS / Insumos" value={`-$${totalCOGS.toFixed(2)}`} sub="Costo de bienes vendidos" negative />
+          <MetricCard label="OPEX / Servicios" value={`-$${totalOPEX.toFixed(2)}`} sub="Gastos operativos" negative />
+          
+          <MetricCard label="Ganancia Bruta" value={`$${gananciaBruta.toFixed(2)}`} highlight positive={gananciaBruta >= 0} sub="Bruto - COGS - OPEX" />
+          <MetricCard label="Nómina / Sueldos" value={`-$${totalNomina.toFixed(2)}`} negative />
+          <MetricCard label="Utilidad Neta (Net Profit)" value={`$${utilidadNeta.toFixed(2)}`} highlight positive={utilidadNeta >= 0} sub="Ganancia Bruta - Nómina" />
         </div>
 
-        {/* ── Empty state ── */}
+        {/* Empty state */}
         {noDataInPeriod && (
           <div className="card" style={{ padding: 40, textAlign: 'center' }}>
             <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.4rem', color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 8 }}>
@@ -176,65 +181,48 @@ export default function FinanzasPage() {
             <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: 20 }}>
               {fmtDate(fechaDesde)} → {fmtDate(fechaHasta)}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, maxWidth: 400, margin: '0 auto' }}>
-              <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '14px 18px', textAlign: 'left' }}>
-                <div style={{ fontSize: '0.55rem', color: 'var(--text-dim)', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Total pedidos (hist.)</div>
-                <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.8rem', marginTop: 2 }}>{allPedidos.length}</div>
-              </div>
-              <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '14px 18px', textAlign: 'left' }}>
-                <div style={{ fontSize: '0.55rem', color: 'var(--text-dim)', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Ventas (hist.)</div>
-                <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.8rem', marginTop: 2, color: 'var(--success)' }}>${histVentas.toFixed(2)}</div>
-              </div>
-            </div>
-            <button
-              onClick={() => { setFechaDesde(getMondayOf(new Date())); setFechaHasta(getSundayOf(new Date())); }}
-              className="btn btn-primary"
-              style={{ marginTop: 20 }}
-            >
-              Ver semana actual
-            </button>
           </div>
         )}
 
-        {/* ── Chart ── */}
-        {chartData.length > 0 && (
-          <div className="card" style={{ padding: 28 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-              <div>
-                <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.2rem', letterSpacing: '0.06em' }}>VENTAS POR DÍA</div>
-                <div style={{ fontSize: '0.6rem', color: 'var(--text-dim)', letterSpacing: '0.1em', textTransform: 'uppercase', marginTop: 2 }}>
-                  {fmtDate(fechaDesde)} → {fmtDate(fechaHasta)}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+          {/* Chart */}
+          {chartData.length > 0 && (
+            <div className="card" style={{ padding: 28 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+                <div>
+                  <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.2rem', letterSpacing: '0.06em' }}>VENTAS POR DÍA</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.6rem', color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Promedio Diario</div>
+                  <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.5rem' }}>${(totalVentas / Math.max(chartData.length, 1)).toFixed(2)}</div>
                 </div>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.6rem', color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Promedio Diario</div>
-                <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.5rem' }}>${(totalVentas / Math.max(chartData.length, 1)).toFixed(2)}</div>
-              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={chartData} barSize={40}>
+                  <XAxis dataKey="dia" axisLine={false} tickLine={false} tick={{ fill: '#444', fontSize: 11, fontWeight: 700 }} />
+                  <YAxis hide />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
+                  <Bar dataKey="ventas" radius={[4, 4, 0, 0]}>
+                    {chartData.map((entry, idx) => (
+                      <Cell key={idx} fill={entry.ventas === maxVenta ? '#CC0000' : '#2a2a2a'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={chartData} barSize={40}>
-                <XAxis dataKey="dia" axisLine={false} tickLine={false} tick={{ fill: '#444', fontSize: 11, fontWeight: 700 }} />
-                <YAxis hide />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
-                <Bar dataKey="ventas" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, idx) => (
-                    <Cell key={idx} fill={entry.ventas === maxVenta ? '#CC0000' : '#2a2a2a'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+          )}
 
-        {/* ── Ticket history with pagination ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <MetricCard label="Acumulado Histórico Retenible" value={`$${acumuladoHistorico.toFixed(2)}`} sub="Utilidad Neta total desde el inicio" globalBadge positive={acumuladoHistorico >= 0} />
+          </div>
+        </div>
+
+        {/* Ticket history with pagination */}
         {pedidos.length > 0 && (
-          <div className="card" style={{ padding: 28 }}>
+          <div className="card" style={{ padding: 28, marginTop: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ fontFamily: 'Bebas Neue', fontSize: '1.2rem', letterSpacing: '0.06em' }}>
-                HISTORIAL DE TICKETS
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontFamily: 'Inter', fontWeight: 600, marginLeft: 8 }}>
-                  ({pedidos.length} resultados)
-                </span>
+                DETALLE DE INGRESOS (TICKETS DEL PERÍODO)
               </div>
               {/* Pagination controls */}
               {totalPages > 1 && (
@@ -267,7 +255,7 @@ export default function FinanzasPage() {
                 <tr>
                   <th>ID Ticket</th>
                   <th>Cliente</th>
-                  <th>Pedido</th>
+                  <th>Método Pago</th>
                   <th>Día</th>
                   <th style={{ textAlign: 'right' }}>Monto</th>
                 </tr>
@@ -277,33 +265,13 @@ export default function FinanzasPage() {
                   <tr key={p.id}>
                     <td style={{ fontFamily: 'Bebas Neue', fontSize: '1rem', color: 'var(--accent)' }}>{p.codigo_ticket}</td>
                     <td style={{ fontWeight: 500 }}>{p.cliente_nombre}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>{p.cantidad_burritos}x Burrito</td>
+                    <td style={{ color: 'var(--text-muted)' }}>{p.metodo_pago || 'Efectivo'}</td>
                     <td><span className="chip chip-day">{(p.dia_entrega || '—').slice(0, 3)}</span></td>
                     <td style={{ textAlign: 'right', fontFamily: 'Bebas Neue', fontSize: '1.1rem' }}>${Number(p.total).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-
-            {/* Page footer */}
-            {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-                {Array.from({ length: totalPages }, (_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setTicketPage(i)}
-                    style={{
-                      width: 28, height: 28, borderRadius: 4,
-                      background: i === ticketPage ? 'var(--accent)' : 'var(--surface-max)',
-                      border: 'none', color: '#fff', cursor: 'pointer',
-                      fontSize: '0.7rem', fontWeight: 700,
-                    }}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -324,7 +292,7 @@ function MetricCard({ label, value, sub, negative, highlight, positive, globalBa
           </span>
         )}
       </div>
-      <div className={`metric-value ${negative ? 'negative' : ''} ${globalBadge && positive !== undefined ? (positive ? 'positive' : 'negative') : ''} ${highlight && positive !== undefined ? (positive ? 'positive' : 'negative') : ''}`}>
+      <div className={`metric-value ${negative ? 'negative' : ''} ${positive === true ? 'positive' : ''} ${positive === false ? 'negative' : ''}`}>
         {value}
       </div>
       {sub && <div className="metric-sub">{sub}</div>}
