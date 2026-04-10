@@ -4,7 +4,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
-import { Search, Clock, X, Check, ChevronRight, Phone, Calendar, Package, Trash2, Edit2, Save, User, MapPin, CreditCard, Banknote, Star } from 'lucide-react';
+import { Search, Clock, X, Check, ChevronRight, Phone, Calendar, Package, Trash2, Edit2, Save, User, MapPin, CreditCard, Banknote, Star, Printer, Bluetooth, BluetoothConnected, BluetoothOff, Eye } from 'lucide-react';
+import { printerInstance } from '@/lib/printer';
+import { generateTicketCanvas } from '@/lib/TicketGenerator';
 
 type Extra  = { nombre: string; precio: number };
 type Pedido = {
@@ -90,6 +92,73 @@ export default function TicketsPage() {
   const [dialog, setDialog]         = useState<{ type: Exclude<DialogType, null>; ticket: Pedido } | null>(null);
   const [working, setWorking]       = useState(false);
   const [saving, setSaving]         = useState(false);
+  const [printerStatus, setPrinterStatus] = useState<'connected' | 'disconnected' | 'connecting'>('disconnected');
+
+  useEffect(() => {
+    // Resync on mount in case of hot-reload preserving state while losing singleton
+    if (printerInstance.isConnected()) {
+      setPrinterStatus('connected');
+    } else {
+      printerInstance.autoConnect();
+    }
+    printerInstance.onStatusChange = (s) => setPrinterStatus(s);
+  }, []);
+
+  const handleConnectPrinter = async () => {
+    if (printerStatus === 'connected') {
+      printerInstance.disconnect();
+    } else {
+      await printerInstance.connect();
+    }
+  };
+
+  const printTicket = async (ticket: Pedido) => {
+    console.log('printTicket called for:', ticket.codigo_ticket);
+    if (!printerInstance.isConnected()) {
+      console.warn('Printer instance is empty or disconnected, resolving UI state out-of-sync');
+      setPrinterStatus('disconnected');
+      alert('La impresora se desconectó. Por favor, dale al botón de "CONECTAR IMPRESORA" nuevamente.');
+      return;
+    }
+    try {
+      const canvas = await generateTicketCanvas(ticket);
+      await printerInstance.printCanvas(canvas);
+    } catch (error) {
+      console.error('Print failed:', error);
+      alert('Error al imprimir. Verifica la conexión con la impresora.');
+    }
+  };
+
+  const previewTicket = async (ticket: Pedido) => {
+    try {
+      const canvas = await generateTicketCanvas(ticket);
+      const dataUrl = canvas.toDataURL('image/png');
+      const w = window.open('about:blank', '_blank');
+      if (w) {
+        w.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Vista Previa - ${ticket.codigo_ticket}</title>
+              <style>
+                body { margin: 0; background: #e0e0e0; display: flex; justify-content: center; padding: 40px; font-family: sans-serif; }
+                .ticket { background: white; box-shadow: 0 10px 25px rgba(0,0,0,0.15); max-width: 100%; border-radius: 4px; }
+              </style>
+            </head>
+            <body>
+              <img src="${dataUrl}" class="ticket" alt="Ticket Preview">
+            </body>
+          </html>
+        `);
+        w.document.close();
+      } else {
+        alert('Por favor, permite las ventanas emergentes (pop-ups) en tu navegador para ver la vista previa.');
+      }
+    } catch (error) {
+      console.error('Preview failed:', error);
+      alert('Error al generar la vista previa.');
+    }
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -149,7 +218,16 @@ export default function TicketsPage() {
     }
     setDialog(null);
     if (type === 'confirm') await supabase.from('pedidos').update({ estado: 'pendiente' }).eq('id', ticket.id);
-    else if (type === 'ready')   await supabase.from('pedidos').update({ estado: 'para_entregar' }).eq('id', ticket.id);
+    else if (type === 'ready') {
+      console.log('Order ready: Attempting auto-print for', ticket.codigo_ticket);
+      await supabase.from('pedidos').update({ estado: 'para_entregar' }).eq('id', ticket.id);
+      // Auto print ticket
+      if (printerStatus === 'connected') {
+        printTicket(ticket);
+      } else {
+        console.warn('Printer not connected, skipping auto-print. Status:', printerStatus);
+      }
+    }
     else if (type === 'deliver') {
       const { data: sData } = await supabase.from('sesiones_caja').select('id').eq('estado', 'ABIERTA').single();
       await supabase.from('pedidos').update({ estado: 'entregado', metodo_pago: payload?.metodoPago || ticket.metodo_pago, sesion_caja_id: sData ? sData.id : null }).eq('id', ticket.id);
@@ -301,6 +379,21 @@ export default function TicketsPage() {
             <Search size={14} color="var(--text-dim)" />
             <input placeholder="Buscar por ID o cliente..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
+
+          <button
+            onClick={handleConnectPrinter}
+            style={{
+              padding: '6px 12px', borderRadius: 6, fontSize: '0.65rem', fontWeight: 800,
+              display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', transition: 'all 0.2s',
+              background: printerStatus === 'connected' ? 'var(--success)' : (printerStatus === 'connecting' ? 'var(--warning)' : 'var(--surface-max)'),
+              color: printerStatus === 'connected' ? '#111' : (printerStatus === 'connecting' ? '#111' : 'var(--text-muted)'),
+              border: 'none',
+              opacity: printerStatus === 'connecting' ? 0.7 : 1,
+            }}
+          >
+            {printerStatus === 'connected' ? <BluetoothConnected size={14} /> : (printerStatus === 'connecting' ? <Bluetooth size={14} className="animate-spin" /> : <BluetoothOff size={14} />)}
+            {printerStatus === 'connected' ? 'IMPRESORA LISTA' : (printerStatus === 'connecting' ? 'CONECTANDO...' : 'CONECTAR IMPRESORA')}
+          </button>
         </div>
       </div>
 
@@ -460,10 +553,22 @@ export default function TicketsPage() {
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {!isEditing && (
-                  <button onClick={startEdit} title="Editar pedido"
-                    style={{ background: 'var(--surface-max)', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em' }}>
-                    <Edit2 size={13} /> EDITAR
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => previewTicket(detailTicket)}
+                      title="Ver vista previa"
+                      style={{ background: 'var(--surface-max)', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em' }}>
+                      <Eye size={13} /> VISTA PREVIA
+                    </button>
+                    <button onClick={() => printTicket(detailTicket)}
+                      title="Imprimir ticket"
+                      style={{ background: 'var(--surface-max)', border: 'none', color: 'var(--success)', cursor: 'pointer', padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em' }}>
+                      <Printer size={13} /> IMPRIMIR
+                    </button>
+                    <button onClick={startEdit} title="Editar pedido"
+                      style={{ background: 'var(--surface-max)', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em' }}>
+                      <Edit2 size={13} /> EDITAR
+                    </button>
+                  </div>
                 )}
                 <button onClick={() => { setDetail(null); setIsEditing(false); }}
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', paddingTop: 4 }}>

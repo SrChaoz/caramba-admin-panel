@@ -898,3 +898,12 @@ input, select, textarea { font-family: var(--font-body); outline: none; }
   .ticket-name { font-size: 0.75rem; }
   .ticket-ingredients { font-size: 0.65rem; }
 }
+
+/* ══ ANIMATIONS ══ */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
