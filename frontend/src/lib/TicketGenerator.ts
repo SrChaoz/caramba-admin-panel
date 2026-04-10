@@ -28,13 +28,30 @@ export async function generateTicketCanvas(order: OrderData): Promise<HTMLCanvas
   let currentY = 0;
 
   // Helper to draw text
-  const drawText = (text: string, size: number, x: number, y: number, align: 'left' | 'center' | 'right' = 'left', bold = false) => {
-    ctx.font = `${bold ? 'bold' : ''} ${size}px 'Courier New', monospace`;
+  const drawText = (text: string, size: number, x: number, y: number, align: 'left' | 'center' | 'right' = 'left', bold = false, italic = false, inverse = false) => {
+    ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${size}px 'Courier New', monospace`;
     ctx.textAlign = align;
-    ctx.textBaseline = 'top'; // This prevents text from overlapping upwards
-    ctx.fillStyle = 'black';
+    ctx.textBaseline = 'top';
+    
+    if (inverse) {
+      const metrics = ctx.measureText(text);
+      const paddingX = 6;
+      const bgWidth = metrics.width + paddingX * 2;
+      const bgHeight = size + 6;
+      let bgX = x;
+      if (align === 'center') bgX = x - bgWidth / 2;
+      else if (align === 'right') bgX = x - bgWidth;
+      else bgX = x - paddingX;
+      
+      ctx.fillStyle = 'black';
+      ctx.fillRect(bgX, y - 2, bgWidth, bgHeight);
+      ctx.fillStyle = 'white';
+    } else {
+      ctx.fillStyle = 'black';
+    }
+    
     ctx.fillText(text, x, y);
-    return y + size + 4; // Return the NEXT Y coordinate (4px gap under text)
+    return y + size + (inverse ? 8 : 4);
   };
 
   const drawLine = (y: number) => {
@@ -134,10 +151,34 @@ export async function generateTicketCanvas(order: OrderData): Promise<HTMLCanvas
   }
 
   groups.forEach((ings, idx) => {
+    const burritoNumber = idx + 1;
     currentY += 10; // Extra spacing between burritos
-    currentY = drawText(`${idx + 1}/${cantidad} BURRITO ARMA-LO`, 18, 0, currentY, 'left', true);
-    // Wrap ingredients separated by commas
-    const allIngs = ings.join(', ');
+    currentY = drawText(`${burritoNumber}/${cantidad} BURRITO`, 18, 0, currentY, 'left', true);
+
+    const burritoExtras = order.extras?.filter(ext => {
+      const match = ext.nombre.match(/^\[B(\d+)\]/i);
+      return match ? parseInt(match[1]) === burritoNumber : burritoNumber === 1;
+    }) || [];
+
+    const mainIngs = [...ings];
+    const realExtras: string[] = [];
+
+    burritoExtras.forEach(ext => {
+      let cleanName = ext.nombre.replace(/^\[B\d+\]\s*/i, '');
+      cleanName = cleanName.replace(/\s*\(\+\$[\d.]+\)/, ''); // Siempre ocultar el precio en el ticket de cocina
+
+      if (cleanName.toLowerCase().startsWith('extra:')) {
+        cleanName = cleanName.replace(/^Extra:\s*/i, '').trim();
+        mainIngs.push(cleanName);
+      } else if (cleanName.toLowerCase().startsWith('recargo:')) {
+        cleanName = cleanName.replace(/^Recargo:\s*/i, '').trim();
+        mainIngs.push(cleanName);
+      } else {
+        realExtras.push(cleanName.trim());
+      }
+    });
+
+    const allIngs = mainIngs.join(', ') + '.';
     const words = allIngs.split(' ');
     let line = '';
     for (const word of words) {
@@ -151,16 +192,27 @@ export async function generateTicketCanvas(order: OrderData): Promise<HTMLCanvas
     if (line.trim()) {
       currentY = drawText(line.trim(), 16, 20, currentY, 'left');
     }
-  });
 
-  // Extras
-  if (order.extras && order.extras.length > 0) {
-    currentY += 10;
-    currentY = drawText('EXTRAS:', 18, 0, currentY, 'left', true);
-    order.extras.forEach(ext => {
-      currentY = drawText(` + ${ext.nombre}`, 16, 20, currentY, 'left');
-    });
-  }
+    if (realExtras.length > 0) {
+      currentY += 4;
+      // Dibujar etiqueta EXTRAS en negrita e itálica
+      currentY = drawText('* EXTRAS:', 14, 20, currentY, 'left', true, true, false); 
+      
+      const extraWords = realExtras.join(', ').split(' ');
+      let eLine = '';
+      for (const word of extraWords) {
+        if ((eLine + word).length > 45) { // Caben más caracteres al ser tamaño 14
+          currentY = drawText(eLine.trim(), 14, 25, currentY, 'left', false, true); // Itálica
+          eLine = word + ' ';
+        } else {
+          eLine += word + ' ';
+        }
+      }
+      if (eLine.trim()) {
+        currentY = drawText(eLine.trim(), 14, 25, currentY, 'left', false, true);
+      }
+    }
+  });
 
   currentY = drawLine(currentY);
 

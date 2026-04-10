@@ -716,21 +716,49 @@ export default function TicketsPage() {
 
                 <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '4px 0 20px' }} />
 
-                {splitIngredients(detailTicket.ingredientes, detailTicket.cantidad_burritos).map((ings, idx) => (
-                  <div key={idx} style={{ marginBottom: 14 }}>
-                    <div style={{ fontFamily: 'Bebas Neue', fontSize: '0.9rem', color: 'var(--accent)', letterSpacing: '0.08em', marginBottom: 5 }}>
-                      <Package size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> {detailTicket.cantidad_burritos === 1 ? 'Ingredientes:' : `Burrito ${idx + 1}:`}
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.7, paddingLeft: 24 }}>
-                      {ings.length > 0 ? ings.join(', ') + '.' : '—'}
-                    </div>
-                    {idx === detailTicket.cantidad_burritos - 1 && detailTicket.extras?.length > 0 && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--warning)', paddingLeft: 24, marginTop: 4 }}>
-                        <Star size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> Extras: {detailTicket.extras.map(e => e.precio > 0 ? `${e.nombre} (+$${Number(e.precio).toFixed(2)})` : e.nombre).join(', ')}
+                {splitIngredients(detailTicket.ingredientes, detailTicket.cantidad_burritos).map((ings, idx) => {
+                  const burritoNumber = idx + 1;
+                  const isFirst = burritoNumber === 1;
+
+                  const burritoExtras = detailTicket.extras?.filter(ext => {
+                    const match = ext.nombre.match(/^\[B(\d+)\]/i);
+                    return match ? parseInt(match[1]) === burritoNumber : isFirst;
+                  }) || [];
+
+                  const mainIngs = [...ings];
+                  const realExtras: string[] = [];
+
+                  burritoExtras.forEach(ext => {
+                    let cleanName = ext.nombre.replace(/^\[B\d+\]\s*/i, '');
+                    cleanName = cleanName.replace(/\s*\(\+\$[\d.]+\)/, ''); // Quitar los precios visuales del UI
+                    
+                    if (cleanName.toLowerCase().startsWith('extra:')) {
+                      cleanName = cleanName.replace(/^Extra:\s*/i, '').trim();
+                      mainIngs.push(cleanName);
+                    } else if (cleanName.toLowerCase().startsWith('recargo:')) {
+                      cleanName = cleanName.replace(/^Recargo:\s*/i, '').trim();
+                      mainIngs.push(cleanName);
+                    } else {
+                      realExtras.push(cleanName.trim());
+                    }
+                  });
+
+                  return (
+                    <div key={idx} style={{ marginBottom: 14 }}>
+                      <div style={{ fontFamily: 'Bebas Neue', fontSize: '0.9rem', color: 'var(--accent)', letterSpacing: '0.08em', marginBottom: 5 }}>
+                        <Package size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> {detailTicket.cantidad_burritos === 1 ? 'Ingredientes:' : `Burrito ${burritoNumber}:`}
                       </div>
-                    )}
-                  </div>
-                ))}
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.7, paddingLeft: 24 }}>
+                        {mainIngs.length > 0 ? mainIngs.join(', ') + '.' : '—'}
+                      </div>
+                      {realExtras.length > 0 && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--warning)', paddingLeft: 24, marginTop: 4 }}>
+                          <Star size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> Extras: {realExtras.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </>
             )}
           </div>
@@ -772,23 +800,50 @@ function KanbanCol({ title, color, tickets, actions, onOpen, variant = 'default'
                 </div>
                 <div className="ticket-name">{p.cliente_nombre}</div>
 
-                {burritos.map((ings, idx) => (
-                  <div key={idx} style={{ marginBottom: 6 }}>
-                    <div className="ticket-item-pill">
-                      <span>{p.cantidad_burritos === 1 ? `${p.cantidad_burritos}x` : `${idx + 1}/${p.cantidad_burritos}`}</span>
-                      <Package size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> BURRITO
-                    </div>
-                    <div className="ticket-ingredients" style={{ marginTop: 3 }}>
-                      {ings.slice(0, 5).join(' · ')}{ings.length > 5 ? ` +${ings.length - 5}` : ''}
-                    </div>
-                  </div>
-                ))}
+                {burritos.map((ings, idx) => {
+                  const burritoNumber = idx + 1;
+                  const isFirst = burritoNumber === 1;
 
-                {p.extras?.length > 0 && (
-                  <div style={{ fontSize: '0.65rem', color: 'var(--warning)', marginBottom: 6 }}>
-                    <Star size={10} style={{ display: 'inline', marginRight: 3, verticalAlign: 'text-bottom' }} /> {p.extras.map(e => e.nombre).join(', ')}
-                  </div>
-                )}
+                  const burritoExtras = p.extras?.filter(ext => {
+                    const match = ext.nombre.match(/^\[B(\d+)\]/i);
+                    return match ? parseInt(match[1]) === burritoNumber : isFirst;
+                  }) || [];
+
+                  const mainIngs = [...ings];
+                  const realExtras: string[] = [];
+
+                  burritoExtras.forEach(ext => {
+                    let cleanName = ext.nombre.replace(/^\[B\d+\]\s*/i, '');
+                    cleanName = cleanName.replace(/\s*\(\+\$[\d.]+\)/, ''); // Ocultar precios en Kanban view
+                    
+                    if (cleanName.toLowerCase().startsWith('extra:')) {
+                      cleanName = cleanName.replace(/^Extra:\s*/i, '').trim();
+                      mainIngs.push(cleanName);
+                    } else if (cleanName.toLowerCase().startsWith('recargo:')) {
+                      cleanName = cleanName.replace(/^Recargo:\s*/i, '').trim();
+                      mainIngs.push(cleanName);
+                    } else {
+                      realExtras.push(cleanName.trim());
+                    }
+                  });
+
+                  return (
+                    <div key={idx} style={{ marginBottom: 8 }}>
+                      <div className="ticket-item-pill" style={{ marginBottom: 4 }}>
+                        <span>{p.cantidad_burritos === 1 ? `${p.cantidad_burritos}x` : `${burritoNumber}/${p.cantidad_burritos}`}</span>
+                        <Package size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> BURRITO
+                      </div>
+                      <div className="ticket-ingredients" style={{ marginTop: 2 }}>
+                        {mainIngs.slice(0, 5).join(' · ')}{mainIngs.length > 5 ? ` +${mainIngs.length - 5}` : ''}
+                      </div>
+                      {realExtras.length > 0 && (
+                        <div style={{ fontSize: '0.65rem', color: 'var(--warning)', marginTop: 3 }}>
+                          <Star size={9} style={{ display: 'inline', marginRight: 3, verticalAlign: 'text-bottom' }} /> {realExtras.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 10, marginTop: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.63rem', color: 'var(--text-dim)', marginBottom: 8 }}>
