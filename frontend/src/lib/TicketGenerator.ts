@@ -96,7 +96,27 @@ export async function generateTicketCanvas(order: OrderData): Promise<HTMLCanvas
   }
 
   // 3. Header Info
-  currentY = drawText('LOS DE LOS 20 CM', 13, width / 2, currentY, 'center');
+  const headerBaselineY = currentY;
+  // Desplazar un poco el texto a la izquierda para que el combo Texto + Icono quede bien centrado (aprox 12px)
+  currentY = drawText('LOS DE LOS 20cm', 12, (width / 2) - 10, currentY, 'center');
+  
+  try {
+    const devilImg = new Image();
+    // Ajustado el viewBox a 2 0 20 22 para retirar el padding vacío original del SVG de 24x24
+    const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="2 0 20 23" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9 L4 2 L10 6"/><path d="M18 9 L20 2 L14 6"/><circle cx="12" cy="14" r="8"/><path d="M8 11 L10 13 M16 11 L14 13"/><path d="M9 17c1.5 1.5 4.5 1.5 6 0"/></svg>`;
+    devilImg.src = 'data:image/svg+xml;base64,' + (typeof btoa !== 'undefined' ? btoa(svgStr) : Buffer.from(svgStr).toString('base64'));
+    await new Promise((resolve) => {
+      devilImg.onload = resolve;
+      devilImg.onerror = resolve;
+    });
+    if (devilImg.complete && devilImg.naturalWidth > 0) {
+      // Dibujar icono exactamente alineado a la derecha de la base del texto
+      ctx.drawImage(devilImg, (width / 2) + 48, headerBaselineY - 3, 16, 16);
+    }
+  } catch (e) {
+    console.warn('Could not draw devil face');
+  }
+
   currentY = drawLine(currentY);
 
   //currentY = drawText(`TICKET: ${order.codigo_ticket}`, 32, width / 2, currentY, 'center', true);
