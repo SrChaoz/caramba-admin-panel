@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
-import { Search, Clock, X, Check, ChevronRight, Phone, Calendar, Package, Trash2, Edit2, Save, User, MapPin, CreditCard, Banknote, Star, Printer, Bluetooth, BluetoothConnected, BluetoothOff, Eye } from 'lucide-react';
+import { Search, Clock, X, Check, ChevronRight, Phone, Calendar, Package, Trash2, Edit2, Save, User, MapPin, CreditCard, Banknote, Star, Printer, Bluetooth, BluetoothConnected, BluetoothOff, Eye, Bell } from 'lucide-react';
+import { useRef } from 'react';
 import { printerInstance } from '@/lib/printer';
 import { generateTicketCanvas } from '@/lib/TicketGenerator';
 
@@ -34,7 +35,6 @@ type MenuConfig = { basePrice: number; freeToppingsLimit: number; };
 /** Split ingredient array into per-burrito arrays. */
 function splitIngredients(ingredientes: string[], cantidad: number): string[][] {
   if (!ingredientes?.length) return Array.from({ length: Math.max(cantidad, 1) }, () => []);
-  if (cantidad <= 1) return [ingredientes];
 
   const hasSeparators = ingredientes.some(i => i.startsWith('---'));
 
@@ -93,6 +93,36 @@ export default function TicketsPage() {
   const [working, setWorking]       = useState(false);
   const [saving, setSaving]         = useState(false);
   const [printerStatus, setPrinterStatus] = useState<'connected' | 'disconnected' | 'connecting'>('disconnected');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [isLive, setIsLive] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Initialize audio
+  useEffect(() => {
+    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    audioRef.current.load();
+  }, []);
+
+  const playNotification = () => {
+    if (audioRef.current && notificationsEnabled) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(e => console.warn('Audio play blocked:', e));
+    }
+  };
+
+  const toggleNotifications = () => {
+    if (!notificationsEnabled) {
+      // First time enabling requires a user gesture.
+      // We play a quick silent sound or the bell to unlock.
+      if (audioRef.current) {
+        audioRef.current.play().then(() => {
+          audioRef.current?.pause();
+          audioRef.current!.currentTime = 0;
+        }).catch(e => console.warn('Audio unlock failed:', e));
+      }
+    }
+    setNotificationsEnabled(!notificationsEnabled);
+  };
 
   useEffect(() => {
     // Resync on mount in case of hot-reload preserving state while losing singleton
@@ -203,10 +233,22 @@ export default function TicketsPage() {
     })();
 
     const sub = supabase.channel('pedidos_live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => fetchPedidos())
-      .subscribe();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, (payload) => {
+        console.log('Realtime change detected:', payload.eventType);
+        
+        if (payload.eventType === 'INSERT') {
+          playNotification();
+        }
+        
+        fetchPedidos();
+      })
+      .subscribe((status) => {
+        console.log('Realtime status:', status);
+        setIsLive(status === 'SUBSCRIBED');
+      });
+
     return () => { supabase.removeChannel(sub); };
-  }, [session, fetchPedidos]);
+  }, [session, fetchPedidos, notificationsEnabled]);
 
   const act = async (type: Exclude<DialogType, null>, ticket: Pedido, payload?: any) => {
     setWorking(true);
@@ -378,6 +420,35 @@ export default function TicketsPage() {
           <div className="topbar-search">
             <Search size={14} color="var(--text-dim)" />
             <input placeholder="Buscar por ID o cliente..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+
+          <button
+            onClick={toggleNotifications}
+            style={{
+              padding: '6px 12px', borderRadius: 6, fontSize: '0.65rem', fontWeight: 800,
+              display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', transition: 'all 0.2s',
+              background: notificationsEnabled ? 'var(--accent)' : 'var(--surface-max)',
+              color: notificationsEnabled ? '#fff' : 'var(--text-muted)',
+              border: 'none',
+              boxShadow: notificationsEnabled ? '0 0 10px rgba(255,51,51,0.3)' : 'none',
+            }}
+          >
+            <Bell size={14} className={notificationsEnabled ? 'animate-pulse' : ''} />
+            {notificationsEnabled ? 'NOTIFICACIONES ACTIVAS' : 'ACTIVAR SONIDO'}
+          </button>
+
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+            background: 'var(--surface-max)', borderRadius: 6, fontSize: '0.65rem', fontWeight: 800,
+            color: isLive ? 'var(--success)' : 'var(--warning)'
+          }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: isLive ? 'var(--success)' : 'var(--warning)',
+              boxShadow: isLive ? '0 0 8px var(--success)' : 'none',
+              animation: isLive ? 'pulse 2s infinite' : 'none'
+            }} />
+            {isLive ? 'LIVE' : 'CONNECTING...'}
           </div>
 
           <button

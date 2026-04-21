@@ -58,7 +58,28 @@ export default function CajaPage() {
   };
 
   useEffect(() => {
-    if (sessionUser) loadActiveSession();
+    if (!sessionUser) return;
+    loadActiveSession();
+
+    // Sincronización en tiempo real para Caja
+    const channel = supabase.channel('caja_live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        console.log('Update in pedidos detected (Caja)');
+        loadActiveSession();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transacciones' }, () => {
+        console.log('Update in transacciones detected (Caja)');
+        loadActiveSession();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sesiones_caja' }, () => {
+        console.log('Update in sesiones_caja detected (Caja)');
+        loadActiveSession();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [sessionUser]);
 
   const handleOpenShift = async (e: React.FormEvent) => {
