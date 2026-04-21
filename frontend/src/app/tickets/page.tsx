@@ -43,13 +43,13 @@ function splitIngredients(ingredientes: string[], cantidad: number): string[][] 
     let current: string[] = [];
     for (const item of ingredientes) {
       if (item.startsWith('---')) {
-        groups.push(current);
+        if (current.length > 0) groups.push(current);
         current = [];
       } else {
         current.push(item);
       }
     }
-    groups.push(current);
+    if (current.length > 0) groups.push(current);
     return groups;
   }
 
@@ -734,7 +734,7 @@ export default function TicketsPage() {
                     
                     if (cleanName.toLowerCase().startsWith('extra:')) {
                       cleanName = cleanName.replace(/^Extra:\s*/i, '').trim();
-                      mainIngs.push(cleanName);
+                      realExtras.push(cleanName);
                     } else if (cleanName.toLowerCase().startsWith('recargo:')) {
                       cleanName = cleanName.replace(/^Recargo:\s*/i, '').trim();
                       mainIngs.push(cleanName);

@@ -4,46 +4,47 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
-import { Search, Plus, Pencil, X, Save, Settings, Layers, Hash } from 'lucide-react';
+import { Plus, X, Eye, EyeOff, Pencil } from 'lucide-react';
 
-type Categoria = { id: string; nombre: string; es_requerido: boolean; orden: number; producto_id: string; };
-type Topping = { id: string; nombre: string; emoji: string; categoria_id: string; exclusive_group: string | null; precio_extra: number; precio_surcharge: number; precio_proteina_combo: number; disponible: boolean; orden: number; oculto: boolean; };
-type Config = { min_toppings: number; free_toppings_limit: number; precio_base: number; whatsapp_phone: string; };
-
-type ModalState = 'crear_topping' | 'editar_topping' | 'crear_cat' | 'editar_cat' | null;
+type Producto = {
+  id: string; nombre: string; descripcion: string;
+  precio_base: number; tipo: string;
+  emoji: string; min_toppings: number; free_toppings_limit: number;
+  activo: boolean; categoria_plato: string;
+};
+type CategoriaPlato = { id: number; nombre: string; orden: number };
+type TipoPlato = { id: number; nombre: string; descripcion: string; orden: number };
+type ModalState = 'crear_producto' | 'editar_producto' | 'crear_categoria' | null;
 
 export default function MenuPage() {
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
   const [checking, setChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState<'toppings' | 'categorias' | 'configuracion'>('toppings');
-
-  // Datos
-  const [config, setConfig] = useState<Config>({ min_toppings: 5, free_toppings_limit: 8, precio_base: 3.50, whatsapp_phone: '' });
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
-  const [toppings, setToppings] = useState<Topping[]>([]);
-  
-  // UI states
-  const [search, setSearch] = useState('');
-  const [modal, setModal] = useState<ModalState>(null);
-  const [working, setWorking] = useState<string | null>(null);
-  const [savingConfig, setSavingConfig] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Form states Topping
-  const [editId, setEditId] = useState<string>('');
-  const [fNombre, setFNombre] = useState('');
-  const [fEmoji, setFEmoji] = useState('');
-  const [fCatId, setFCatId] = useState('');
-  const [fPrecio, setFPrecio] = useState('0');
-  const [fSurcharge, setFSurcharge] = useState('0');
-  const [fComboPrice, setFComboPrice] = useState('0');
-  const [fGroup, setFGroup] = useState('');
-  const [fOculto, setFOculto] = useState(false);
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [categorias, setCategorias] = useState<CategoriaPlato[]>([]);
+  const [tipos, setTipos] = useState<TipoPlato[]>([]);
 
-  // Form states Categoria
-  const [fCatReq, setFCatReq] = useState(false);
-  const [fOrden, setFOrden] = useState('0');
+  // Tab activo de categoría ('todos' o el nombre de la categoría)
+  const [tabActivo, setTabActivo] = useState('todos');
+
+  // Modal
+  const [modal, setModal] = useState<ModalState>(null);
+  const [editId, setEditId] = useState('');
+
+  // Form: producto
+  const [fNombre, setFNombre] = useState('');
+  const [fEmoji, setFEmoji] = useState('🌯');
+  const [fDesc, setFDesc] = useState('');
+  const [fPrecio, setFPrecio] = useState('0');
+  const [fTipo, setFTipo] = useState('configurable');
+  const [fCategoria, setFCategoria] = useState('General');
+  const [fMinT, setFMinT] = useState('0');
+  const [fMaxFree, setFMaxFree] = useState('8');
+
+  // Form: nueva categoría
+  const [fCatNombre, setFCatNombre] = useState('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -52,380 +53,294 @@ export default function MenuPage() {
     });
   }, [router]);
 
+  useEffect(() => { if (!checking) fetchAll(); }, [checking]);
+
   const fetchAll = async () => {
     setLoading(true);
-    const [confRes, prodRes, catRes, topRes] = await Promise.all([
-      supabase.from('restaurante_config').select('*'),
-      supabase.from('menu_productos').select('*').eq('id', 'burrito-armalo').single(),
-      supabase.from('menu_categorias').select('*').order('orden'),
-      supabase.from('menu_toppings').select('*').order('orden')
+    const [prodRes, catRes, tipoRes] = await Promise.all([
+      supabase.from('menu_productos').select('*').order('orden'),
+      supabase.from('categorias_plato').select('*').order('orden'),
+      supabase.from('tipos_plato').select('*').order('orden'),
     ]);
-
-    if (prodRes.data) {
-      setConfig({
-        min_toppings: prodRes.data.min_toppings,
-        free_toppings_limit: prodRes.data.free_toppings_limit,
-        precio_base: Number(prodRes.data.precio_base),
-        whatsapp_phone: confRes.data?.find(c => c.clave === 'whatsapp_phone')?.valor?.replace(/"/g, '') || ''
-      });
-    }
+    if (prodRes.data) setProductos(prodRes.data);
     if (catRes.data) setCategorias(catRes.data);
-    if (topRes.data) setToppings(topRes.data);
+    if (tipoRes.data) setTipos(tipoRes.data);
     setLoading(false);
   };
 
-  useEffect(() => {
-    if (session) fetchAll();
-  }, [session]);
+  // ── Filtro ──────────────────────────────────────────────
+  const productosFiltrados = tabActivo === 'todos'
+    ? productos
+    : productos.filter(p => (p.categoria_plato || 'General') === tabActivo);
 
-  const toggleTopping = async (t: Topping) => {
-    setWorking(t.id);
-    setToppings(prev => prev.map(item => item.id === t.id ? { ...item, disponible: !t.disponible } : item));
-    await supabase.from('menu_toppings').update({ disponible: !t.disponible }).eq('id', t.id);
-    setWorking(null);
-  };
-
-  const delTopping = async (id: string) => {
-    if(!confirm('¿Seguro que deseas eliminar este ingrediente permanentemente?')) return;
-    setToppings(prev => prev.filter(t => t.id !== id));
-    await supabase.from('menu_toppings').delete().eq('id', id);
-  };
-
-  const delCategoria = async (id: string) => {
-    if(!confirm('¿Eliminar esta categoría? Se eliminarán todos sus ingredientes asociados.')) return;
-    setCategorias(prev => prev.filter(c => c.id !== id));
-    await supabase.from('menu_categorias').delete().eq('id', id);
-    fetchAll();
-  };
-
-  // Abrir modals
-  const openCrearTopping = () => {
-    setEditId(''); setFNombre(''); setFEmoji(''); setFPrecio('0'); setFSurcharge('0'); setFComboPrice('0'); setFGroup(''); setFOculto(false);
-    setFCatId(categorias[0]?.id || '');
-    setModal('crear_topping');
-  };
-  const openEditarTopping = (t: Topping) => {
-    setEditId(t.id); setFNombre(t.nombre); setFEmoji(t.emoji || ''); 
-    setFPrecio(String(t.precio_extra)); setFSurcharge(String(t.precio_surcharge)); setFComboPrice(String(t.precio_proteina_combo)); setFGroup(t.exclusive_group || ''); setFCatId(t.categoria_id); setFOculto(t.oculto || false);
-    setModal('editar_topping');
-  };
-  
-  const openCrearCat = () => {
-    setEditId(''); setFNombre(''); setFCatReq(false); setFOrden(String(categorias.length + 1));
-    setModal('crear_cat');
-  };
-  const openEditarCat = (c: Categoria) => {
-    setEditId(c.id); setFNombre(c.nombre); setFCatReq(c.es_requerido); setFOrden(String(c.orden));
-    setModal('editar_cat');
-  };
-
-  // Guardar Modals
-  const saveTopping = async (e: React.FormEvent) => {
+  // ── Producto ────────────────────────────────────────────
+  const saveProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = {
-      nombre: fNombre, emoji: fEmoji, categoria_id: fCatId,
-      precio_extra: Number(fPrecio), 
-      precio_surcharge: Number(fSurcharge),
-      precio_proteina_combo: Number(fComboPrice),
-      exclusive_group: fGroup.trim() || null,
-      oculto: fOculto
+      nombre: fNombre, emoji: fEmoji, descripcion: fDesc,
+      precio_base: Number(fPrecio), tipo: fTipo,
+      categoria_plato: fCategoria,
+      min_toppings: Number(fMinT), free_toppings_limit: Number(fMaxFree),
     };
-
-    if (modal === 'crear_topping') {
+    if (modal === 'crear_producto') {
       const newId = fNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      await supabase.from('menu_toppings').insert({ ...payload, id: newId, orden: toppings.length + 1 });
+      await supabase.from('menu_productos').insert({ id: newId, ...payload, orden: productos.length + 1, activo: true });
     } else {
-      await supabase.from('menu_toppings').update(payload).eq('id', editId);
+      await supabase.from('menu_productos').update(payload).eq('id', editId);
     }
-    setModal(null);
+    setModal(null); fetchAll();
+  };
+
+  const delProducto = async (id: string) => {
+    if (!confirm('¿Eliminar este plato?')) return;
+    await supabase.from('menu_productos').delete().eq('id', id);
     fetchAll();
   };
 
+  const toggleActivo = async (p: Producto) => {
+    await supabase.from('menu_productos').update({ activo: !p.activo }).eq('id', p.id);
+    fetchAll();
+  };
+
+  const openCrear = () => {
+    setEditId(''); setFNombre(''); setFEmoji('🌯'); setFDesc('');
+    setFPrecio('0'); setFTipo(tipos[0]?.nombre || 'configurable');
+    setFCategoria(tabActivo !== 'todos' ? tabActivo : (categorias[0]?.nombre || 'General'));
+    setFMinT('0'); setFMaxFree('8');
+    setModal('crear_producto');
+  };
+
+  const openEditar = (p: Producto) => {
+    setEditId(p.id); setFNombre(p.nombre); setFEmoji(p.emoji); setFDesc(p.descripcion || '');
+    setFPrecio(String(p.precio_base)); setFTipo(p.tipo);
+    setFCategoria(p.categoria_plato || 'General');
+    setFMinT(String(p.min_toppings)); setFMaxFree(String(p.free_toppings_limit));
+    setModal('editar_producto');
+  };
+
+  // ── Categoría ────────────────────────────────────────────
   const saveCategoria = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
-      nombre: fNombre, es_requerido: fCatReq, orden: Number(fOrden), producto_id: 'burrito-armalo'
-    };
-    if (modal === 'crear_cat') {
-      const newId = fNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      await supabase.from('menu_categorias').insert({ ...payload, id: newId });
-    } else {
-      await supabase.from('menu_categorias').update(payload).eq('id', editId);
-    }
+    if (!fCatNombre.trim()) return;
+    await supabase.from('categorias_plato').insert({ nombre: fCatNombre.trim(), orden: categorias.length });
+    setFCatNombre('');
     setModal(null);
     fetchAll();
-  };
-
-  const saveConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingConfig(true);
-    await supabase.from('menu_productos').update({ 
-      precio_base: config.precio_base, min_toppings: config.min_toppings, free_toppings_limit: config.free_toppings_limit 
-    }).eq('id', 'burrito-armalo');
-    
-    await supabase.from('restaurante_config')
-      .upsert({ clave: 'whatsapp_phone', valor: JSON.stringify(config.whatsapp_phone) });
-      
-    setSavingConfig(false);
-    alert('Configuración guardada!');
   };
 
   if (checking) return null;
 
-  const filteredToppings = toppings.filter(t => t.nombre.toLowerCase().includes(search.toLowerCase()));
-
   return (
     <AppShell user={session?.user}>
-      {/* Top Bar */}
+      {/* Topbar */}
       <div className="topbar">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="topbar-page-name">GESTIÓN DE MENÚ</span>
-          </div>
-          <span className="topbar-subtitle">Controla los precios, la disponibilidad y los pasos del producto.</span>
+          <span className="topbar-page-name uppercase">Menú Web</span>
+          <span className="topbar-subtitle">Gestión de platos y categorías.</span>
         </div>
         <div className="topbar-actions">
-          {activeTab === 'toppings' && (
-            <>
-              <div className="topbar-search">
-                <Search size={14} color="var(--text-dim)" />
-                <input placeholder="Buscar ingrediente..." value={search} onChange={e => setSearch(e.target.value)} />
-              </div>
-              <button className="btn btn-primary" onClick={openCrearTopping}>
-                <Plus size={14} /> Nuevo Ingrediente
-              </button>
-            </>
-          )}
-          {activeTab === 'categorias' && (
-            <button className="btn btn-primary" onClick={openCrearCat}>
-              <Plus size={14} /> Nueva Categoría
-            </button>
-          )}
+          <button className="btn btn-primary" onClick={openCrear}>
+            <Plus size={14} /> Nuevo Plato
+          </button>
         </div>
       </div>
 
       <div className="page" style={{ maxWidth: 1000 }}>
-        {/* Tabs Nav */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
-          <button className={`btn ${activeTab === 'toppings' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab('toppings')}>
-            <Hash size={14} /> Ingredientes
+        {/* ── Barra de tabs de categoría ── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
+          {/* Tab "Ver Todos" */}
+          <button
+            className={`btn ${tabActivo === 'todos' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setTabActivo('todos')}
+          >
+            Ver Todos
+            <span style={{
+              marginLeft: 6, fontSize: '0.65rem', fontWeight: 900,
+              background: tabActivo === 'todos' ? 'rgba(255,255,255,0.2)' : 'var(--surface-hi)',
+              padding: '1px 7px', borderRadius: 20
+            }}>
+              {productos.length}
+            </span>
           </button>
-          <button className={`btn ${activeTab === 'categorias' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab('categorias')}>
-            <Layers size={14} /> Categorías
-          </button>
-          <button className={`btn ${activeTab === 'configuracion' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab('configuracion')}>
-            <Settings size={14} /> Configuración General
+
+          {/* Tabs por categoría */}
+          {categorias.map(cat => {
+            const count = productos.filter(p => (p.categoria_plato || 'General') === cat.nombre).length;
+            const isActive = tabActivo === cat.nombre;
+            return (
+              <button
+                key={cat.id}
+                className={`btn ${isActive ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setTabActivo(cat.nombre)}
+              >
+                {cat.nombre}
+                <span style={{
+                  marginLeft: 6, fontSize: '0.65rem', fontWeight: 900,
+                  background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--surface-hi)',
+                  padding: '1px 7px', borderRadius: 20
+                }}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* Botón + para nueva categoría */}
+          <button
+            className="btn btn-secondary"
+            title="Nueva categoría"
+            style={{ width: 36, height: 36, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+            onClick={() => { setFCatNombre(''); setModal('crear_categoria'); }}
+          >
+            <Plus size={15} />
           </button>
         </div>
 
-        {/* Tab: TOOPINGS */}
-        {activeTab === 'toppings' && (
-          loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 16, color: 'var(--text-dim)' }}>
-              <div style={{ width: 36, height: 36, border: '3px solid var(--surface-max)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
-              <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cargando ingredientes...</span>
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-            </div>
-          ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-            {filteredToppings.map(t => (
-              <div 
-                key={t.id} 
-                className="card" 
-                style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, opacity: t.disponible ? 1 : 0.6, border: t.disponible ? '1px solid var(--surface-hi)' : '1px solid var(--danger-dim)' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: '1.8rem', position: 'relative' }}>
-                      {t.emoji}
-                      {t.oculto && <span style={{ position: 'absolute', bottom: -5, right: -5, fontSize: '0.8rem', background: 'var(--surface)', padding: 2, borderRadius: '50%' }}>👁️‍🗨️</span>}
-                    </span>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '1rem', color: t.disponible ? 'var(--text)' : 'var(--text-muted)' }}>
-                        {t.nombre} {t.oculto && <span className="chip" style={{ fontSize: '0.6rem', padding: '2px 4px' }}>OCULTO</span>}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                        {categorias.find(c => c.id === t.categoria_id)?.nombre || t.categoria_id}
-                        {t.precio_extra > 0 && <span style={{ color: 'var(--accent)', fontWeight: 'bold', marginLeft: 6 }}>+${t.precio_extra.toFixed(2)}</span>}
-                      </div>
-                    </div>
+        {/* ── Grid de tarjetas ── */}
+        {loading && <div style={{ color: 'var(--text-dim)', padding: 20 }}>Cargando...</div>}
+
+        {!loading && productosFiltrados.length === 0 && (
+          <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>
+            Sin platos en esta categoría.{' '}
+            <button className="btn btn-primary" style={{ marginLeft: 8 }} onClick={openCrear}>
+              <Plus size={13} /> Nuevo Plato
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 16 }}>
+          {productosFiltrados.map(p => (
+            <div
+              key={p.id}
+              className="card"
+              style={{
+                padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
+                cursor: 'pointer', transition: 'border-color 0.2s',
+                opacity: p.activo ? 1 : 0.5,
+              }}
+              onClick={() => router.push(`/menu/${p.id}`)}
+            >
+              {/* Info del plato */}
+              <div style={{ display: 'flex', alignItems: 'start', gap: 14 }}>
+                <span style={{ fontSize: '2.4rem', flexShrink: 0 }}>{p.emoji}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <h3 style={{ margin: 0, fontSize: '1rem' }}>{p.nombre}</h3>
+                    {!p.activo && (
+                      <span style={{ fontSize: '0.6rem', background: 'var(--danger)', color: '#fff', padding: '1px 7px', borderRadius: 20, fontWeight: 900 }}>
+                        Oculto
+                      </span>
+                    )}
                   </div>
-                  {/* Toggle Switch */}
-                  <button 
-                    onClick={() => toggleTopping(t)}
-                    disabled={working === t.id}
-                    title={t.disponible ? "Apagar ingrediente (Agotado)" : "Encender ingrediente (Disponible)"}
-                    style={{
-                      background: t.disponible ? '#16a34a' : 'var(--danger)',
-                      border: 'none', color: '#fff',
-                      width: 40, height: 24, borderRadius: 12, cursor: 'pointer', position: 'relative', transition: 'all 0.2s ease',
-                      opacity: working === t.id ? 0.5 : 1, marginTop: 4
-                    }}
-                  >
-                    <div style={{ position: 'absolute', top: 2, left: t.disponible ? 18 : 2, width: 20, height: 20, background: '#fff', borderRadius: '50%', transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
-                  </button>
-                </div>
-                
-                <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 8, borderTop: '1px solid var(--surface-hi)' }}>
-                  <button className="btn btn-secondary" style={{ flex: 1, padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => openEditarTopping(t)}>
-                    <Pencil size={12}/> Editar
-                  </button>
-                  <button className="btn btn-secondary" style={{ color: 'var(--danger)', padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => delTopping(t.id)}>
-                    Eliminar
-                  </button>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 2 }}>{p.tipo}</div>
+                  <div style={{ fontWeight: 800, color: 'var(--accent)', fontSize: '1.1rem', marginTop: 4 }}>
+                    ${Number(p.precio_base).toFixed(2)}
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-          )
-        )}
 
-        {/* Tab: CATEGORIAS */}
-        {activeTab === 'categorias' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {categorias.map(c => (
-              <div key={c.id} className="card" style={{ padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text)' }}>
-                    {c.orden}. {c.nombre}
-                    {c.es_requerido && <span className="chip chip-accent" style={{ marginLeft: 8, fontSize: '0.6rem' }}>REQUERIDO</span>}
-                  </h3>
-                  <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--text-dim)' }}>ID Interno: {c.id}</p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-secondary" onClick={() => openEditarCat(c)}><Pencil size={14}/> Editar</button>
-                  <button className="btn btn-secondary" style={{ color: 'var(--danger)' }} onClick={() => delCategoria(c.id)}><X size={14}/></button>
-                </div>
+              {/* Acciones */}
+              <div
+                style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}
+                onClick={e => e.stopPropagation()}
+              >
+                <button
+                  className="btn btn-secondary"
+                  title={p.activo ? 'Ocultar en web order' : 'Mostrar en web order'}
+                  style={{ color: p.activo ? '#16a34a' : 'var(--text-dim)', padding: '6px 10px' }}
+                  onClick={() => toggleActivo(p)}
+                >
+                  {p.activo ? <Eye size={14} /> : <EyeOff size={14} />}
+                </button>
+                <button className="btn btn-secondary" style={{ padding: '6px 10px' }} onClick={() => openEditar(p)}>
+                  <Pencil size={14} />
+                </button>
+                <button className="btn btn-secondary" style={{ color: 'var(--danger)', padding: '6px 10px' }} onClick={() => delProducto(p.id)}>
+                  <X size={14} />
+                </button>
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* Tab: CONFIGURACIÓN */}
-        {activeTab === 'configuracion' && (
-          <div className="card" style={{ padding: 24 }}>
-            <h2 style={{ marginBottom: 20, borderBottom: '1px solid var(--surface-max)', paddingBottom: 10 }}>Reglas del Producto (Arma tu Burrito)</h2>
-            <form onSubmit={saveConfig} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20 }}>
-                <div className="field">
-                  <label>Mínimo ingredientes permitidos</label>
-                  <input type="number" min="1" required value={config.min_toppings} onChange={e => setConfig({ ...config, min_toppings: Number(e.target.value) })} />
-                </div>
-                <div className="field">
-                  <label>Límite gratuitos (antes de cobrar extra)</label>
-                  <input type="number" min="1" required value={config.free_toppings_limit} onChange={e => setConfig({ ...config, free_toppings_limit: Number(e.target.value) })} />
-                </div>
-                <div className="field">
-                  <label>Precio Base del Producto ($)</label>
-                  <input type="number" step="0.25" min="0" required value={config.precio_base} onChange={e => setConfig({ ...config, precio_base: Number(e.target.value) })} />
-                </div>
-                <div className="field">
-                  <label>Teléfono WhatsApp (Pedidos)</label>
-                  <input type="text" required value={config.whatsapp_phone} onChange={e => setConfig({ ...config, whatsapp_phone: e.target.value })} />
-                </div>
-              </div>
-              <button type="submit" disabled={savingConfig} className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 24px' }}>
-                <Save size={16} /> {savingConfig ? 'Guardando...' : 'Guardar Configuración'}
-              </button>
-            </form>
-          </div>
-        )}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Modals compartidos */}
-      {modal && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
-          <div className="modal-box">
-            <div className="modal-title">
-              {modal === 'crear_topping' || modal === 'editar_topping' ? 'GESTIONAR INGREDIENTE' : 'GESTIONAR CATEGORÍA'}
-              <button onClick={() => setModal(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={18} /></button>
+      {/* ── MODAL Crear/Editar Plato ── */}
+      {(modal === 'crear_producto' || modal === 'editar_producto') && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
+          <div className="modal-box" style={{ maxWidth: 480 }}>
+            <div className="modal-title uppercase">
+              {modal === 'crear_producto' ? 'Nuevo Plato' : 'Editar Plato'}
+              <button onClick={() => setModal(null)}><X size={18} /></button>
             </div>
-
-            {/* FORMULARIO TOPPINGS */}
-            {(modal === 'crear_topping' || modal === 'editar_topping') && (
-              <form onSubmit={saveTopping} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'flex', gap: 16 }}>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>Emoji</label>
-                    <input type="text" placeholder="Emoji" required value={fEmoji} onChange={e => setFEmoji(e.target.value)} />
-                  </div>
-                  <div className="field" style={{ flex: 3 }}>
-                    <label>Nombre a mostrar</label>
-                    <input type="text" placeholder="Ej: Pico de gallo" required value={fNombre} onChange={e => setFNombre(e.target.value)} />
-                  </div>
-                </div>
-
+            <form onSubmit={saveProducto} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div className="field" style={{ width: 80 }}><label>Emoji</label><input value={fEmoji} onChange={e => setFEmoji(e.target.value)} /></div>
+                <div className="field" style={{ flex: 1 }}><label>Nombre</label><input value={fNombre} onChange={e => setFNombre(e.target.value)} required /></div>
+              </div>
+              <div className="field"><label>Descripción</label><textarea value={fDesc} onChange={e => setFDesc(e.target.value)} /></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div className="field">
-                  <label>Categoría a la que pertenece</label>
-                  <select required value={fCatId} onChange={e => setFCatId(e.target.value)}>
-                    <option value="" disabled>Selecciona categoría...</option>
-                    {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  <label>Tipo de Plato</label>
+                  <select value={fTipo} onChange={e => setFTipo(e.target.value)}>
+                    {tipos.map(t => <option key={t.id} value={t.nombre}>{t.nombre}</option>)}
                   </select>
                 </div>
-
-                <div style={{ display: 'flex', gap: 16 }}>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>Precio Extra ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(para &gt;8 ingredientes o 2da proteína)</span></label>
-                    <input type="number" step="0.05" min="0" required value={fPrecio} onChange={e => setFPrecio(e.target.value)} />
-                  </div>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>Grupo de Exclusividad ID</label>
-                    <input type="text" placeholder="Ej: arroz o meat (opcional)" value={fGroup} onChange={e => setFGroup(e.target.value)} />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 16 }}>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>Recargo Base ($) <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>(cuando es proteína inicial, ej. Carne +$0.50)</span></label>
-                    <input type="number" step="0.05" min="0" value={fSurcharge} onChange={e => setFSurcharge(e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
-                  <input type="checkbox" id="oculto" checked={fOculto} onChange={e => setFOculto(e.target.checked)} style={{ width: 18, height: 18 }} />
-                  <label htmlFor="oculto" style={{ cursor: 'pointer', margin: 0, fontWeight: 'bold', color: 'var(--warning, #f59e0b)' }}>
-                    Ocultar del menú web (Temporalmente inactivo)
-                  </label>
-                </div>
-
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Nota: Para el "Grupo de Exclusividad", si dos ingredientes tienen el mismo ID de exclusión (ej. "arroz"), no podrán ser seleccionados ambos a la vez de forma gratuita en el portal según las reglas base.</p>
-
-                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-                  <button type="button" onClick={() => setModal(null)} className="btn btn-secondary" style={{ flex: 1 }}>Cancelar</button>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}><Save size={14} /> Guardar</button>
-                </div>
-              </form>
-            )}
-
-            {/* FORMULARIO CATEGORIAS */}
-            {(modal === 'crear_cat' || modal === 'editar_cat') && (
-              <form onSubmit={saveCategoria} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div className="field">
-                  <label>Nombre de la Categoría</label>
-                  <input type="text" placeholder="Ej. Proteína Extra" required value={fNombre} onChange={e => setFNombre(e.target.value)} />
+                  <label>Categoría de Menú</label>
+                  <select value={fCategoria} onChange={e => setFCategoria(e.target.value)}>
+                    {categorias.map(c => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                  </select>
                 </div>
-                
-                <div style={{ display: 'flex', gap: 16 }}>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>Orden visual (N°)</label>
-                    <input type="number" min="1" required value={fOrden} onChange={e => setFOrden(e.target.value)} />
-                  </div>
-                  <div className="field" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, alignSelf:'flex-end', paddingBottom: 10 }}>
-                    <input type="checkbox" id="req" checked={fCatReq} onChange={e => setFCatReq(e.target.checked)} style={{ width: 18, height: 18 }} />
-                    <label htmlFor="req" style={{ cursor: 'pointer', margin: 0 }}>¿Debe elegirse al menos uno?</label>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-                  <button type="button" onClick={() => setModal(null)} className="btn btn-secondary" style={{ flex: 1 }}>Cancelar</button>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}><Save size={14} /> Guardar</button>
-                </div>
-              </form>
-            )}
-
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <div className="field"><label>Precio $</label><input type="number" step="0.01" value={fPrecio} onChange={e => setFPrecio(e.target.value)} /></div>
+                <div className="field"><label>Mín. Ingred.</label><input type="number" value={fMinT} onChange={e => setFMinT(e.target.value)} /></div>
+                <div className="field"><label>Max Libres</label><input type="number" value={fMaxFree} onChange={e => setFMaxFree(e.target.value)} /></div>
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ marginTop: 8 }}>Guardar Plato</button>
+            </form>
           </div>
         </div>
       )}
+
+      {/* ── MODAL Nueva Categoría ── */}
+      {modal === 'crear_categoria' && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
+          <div className="modal-box" style={{ maxWidth: 400 }}>
+            <div className="modal-title uppercase">
+              Nueva Categoría de Menú
+              <button onClick={() => setModal(null)}><X size={18} /></button>
+            </div>
+            <form onSubmit={saveCategoria} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="field">
+                <label>Nombre de la categoría</label>
+                <input
+                  value={fCatNombre}
+                  onChange={e => setFCatNombre(e.target.value)}
+                  placeholder="ej: Postres, Entradas, Bebidas…"
+                  autoFocus
+                  required
+                />
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', margin: 0 }}>
+                Podrás asignar platos a esta categoría desde la configuración de cada plato.
+              </p>
+              <button type="submit" className="btn btn-primary">Crear Categoría</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        .field { display: flex; flex-direction: column; gap: 4px; }
+        .field label { font-size: 0.75rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; }
+        .field input, .field select, .field textarea {
+          background: var(--surface); border: 1px solid var(--surface-hi);
+          padding: 10px; border-radius: 8px; color: var(--text); outline: none;
+        }
+        .field input:focus, .field select:focus { border-color: var(--accent); }
+        .card:hover { border-color: var(--accent) !important; }
+      `}</style>
     </AppShell>
   );
 }
