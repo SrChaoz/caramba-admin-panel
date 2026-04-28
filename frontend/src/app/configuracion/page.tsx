@@ -20,6 +20,9 @@ export default function ConfiguracionPage() {
   const [whatsapp, setWhatsapp] = useState('');
   const [savingWa, setSavingWa] = useState(false);
 
+  const [deliveryDays, setDeliveryDays] = useState<string[]>(['Viernes', 'Sábado']);
+  const [newDay, setNewDay] = useState('');
+
   const [nuevaCat, setNuevaCat] = useState('');
   const [nuevoTipo, setNuevoTipo] = useState('');
   const [nuevoTipoDesc, setNuevoTipoDesc] = useState('');
@@ -33,6 +36,14 @@ export default function ConfiguracionPage() {
 
   useEffect(() => { if (!checking) fetchAll(); }, [checking]);
 
+  const sortDays = (days: string[]) => {
+    const dayOrder: Record<string, number> = {
+      'lunes': 1, 'martes': 2, 'miércoles': 3, 'miercoles': 3,
+      'jueves': 4, 'viernes': 5, 'sábado': 6, 'sabado': 6, 'domingo': 7
+    };
+    return [...days].sort((a, b) => (dayOrder[a.toLowerCase()] || 99) - (dayOrder[b.toLowerCase()] || 99));
+  };
+
   const fetchAll = async () => {
     setLoading(true);
     const [confRes, catRes, tipoRes] = await Promise.all([
@@ -44,6 +55,13 @@ export default function ConfiguracionPage() {
     if (tipoRes.data) setTipos(tipoRes.data);
     if (confRes.data) {
       setWhatsapp(confRes.data?.find((c: any) => c.clave === 'whatsapp_phone')?.valor?.replace(/"/g, '') || '');
+      const rawDays = confRes.data?.find((c: any) => c.clave === 'dias_entrega')?.valor;
+      if (rawDays) {
+        try {
+          const parsedDays = typeof rawDays === 'string' ? JSON.parse(rawDays) : rawDays;
+          if (Array.isArray(parsedDays)) setDeliveryDays(sortDays(parsedDays));
+        } catch (e) {}
+      }
     }
     setLoading(false);
   };
@@ -53,6 +71,21 @@ export default function ConfiguracionPage() {
     setSavingWa(true);
     await supabase.from('restaurante_config').upsert({ clave: 'whatsapp_phone', valor: `"${whatsapp}"` });
     setSavingWa(false);
+  };
+
+  const addDeliveryDay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDay.trim()) return;
+    const newDays = sortDays([...deliveryDays, newDay.trim()]);
+    setDeliveryDays(newDays);
+    setNewDay('');
+    await supabase.from('restaurante_config').upsert({ clave: 'dias_entrega', valor: JSON.stringify(newDays) });
+  };
+
+  const removeDeliveryDay = async (dayToRemove: string) => {
+    const newDays = deliveryDays.filter(d => d !== dayToRemove);
+    setDeliveryDays(newDays);
+    await supabase.from('restaurante_config').upsert({ clave: 'dias_entrega', valor: JSON.stringify(newDays) });
   };
 
   const addCategoria = async (e: React.FormEvent) => {
@@ -109,6 +142,33 @@ export default function ConfiguracionPage() {
             <button type="submit" className="btn btn-primary" style={{ width: 'fit-content' }} disabled={savingWa}>
               {savingWa ? 'Guardando…' : 'Guardar'}
             </button>
+          </form>
+        </div>
+
+        {/* ── Días de Entrega ── */}
+        <div className="card" style={{ padding: 24 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 4 }}>🗓️ Días de Entrega</h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: 16 }}>
+            Días disponibles para que el cliente elija en el web order.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+            {deliveryDays.map(day => (
+              <div key={day} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', background: 'var(--surface-hi)', borderRadius: 8 }}>
+                <span style={{ fontWeight: 700 }}>{day}</span>
+                <button className="btn btn-secondary" style={{ color: 'var(--danger)', padding: '4px 8px' }} onClick={() => removeDeliveryDay(day)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <form onSubmit={addDeliveryDay} style={{ display: 'flex', gap: 8 }}>
+            <input
+              style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--surface-hi)', padding: '8px 12px', borderRadius: 8, color: 'var(--text)', outline: 'none' }}
+              placeholder="Añadir día (ej: Jueves)"
+              value={newDay}
+              onChange={e => setNewDay(e.target.value)}
+            />
+            <button type="submit" className="btn btn-primary"><Plus size={14} /> Agregar</button>
           </form>
         </div>
 
