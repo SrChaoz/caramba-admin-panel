@@ -71,7 +71,9 @@ export default function ProductoDetailPage() {
   const [pCategoria, setPCategoria] = useState('General');
   const [pImagenUrl, setPImagenUrl] = useState<string | null>(null);
   const [uploadingImg, setUploadingImg] = useState(false);
+  const [uploadedImg, setUploadedImg] = useState(false);
   const [savingProd, setSavingProd] = useState(false);
+  const [savedProd, setSavedProd] = useState(false);
 
   // Form: Categoria
   const [fCatNombre, setFCatNombre] = useState('');
@@ -267,14 +269,24 @@ export default function ProductoDetailPage() {
   const saveProd = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingProd(true);
-    await supabase.from('menu_productos').update({
+    const { error } = await supabase.from('menu_productos').update({
       nombre: pNombre, emoji: pEmoji, descripcion: pDesc,
       precio_base: Number(pPrecio), tipo: pTipo,
       min_toppings: Number(pMinT), free_toppings_limit: Number(pMaxFree),
       categoria_plato: pCategoria.trim() || 'General',
       imagen_url: pImagenUrl,
     }).eq('id', productoId);
+    
     setSavingProd(false);
+    
+    if (!error) {
+      setSavedProd(true);
+      setTimeout(() => setSavedProd(false), 3000);
+    } else {
+      console.error(error);
+      alert('Error al guardar cambios.');
+    }
+    
     fetchAll();
   };
 
@@ -282,18 +294,61 @@ export default function ProductoDetailPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingImg(true);
+
+    // Si ya existe una foto, intentar borrarla del bucket para no dejar basura
+    if (pImagenUrl) {
+      try {
+        const oldPath = pImagenUrl.split('/menu-fotos/')[1]?.split('?')[0];
+        if (oldPath) {
+          await supabase.storage.from('menu-fotos').remove([oldPath]);
+        }
+      } catch (err) {
+        console.error('Error al borrar foto anterior', err);
+      }
+    }
+
     const ext = file.name.split('.').pop();
-    const path = `${productoId}.${ext}`;
+    // Usar un timestamp real en el nombre del archivo para evadir completamente el caché de la CDN de Supabase
+    const path = `${productoId}-${Date.now()}.${ext}`;
+    
     const { error } = await supabase.storage.from('menu-fotos').upload(path, file, { upsert: true });
+    
     if (!error) {
       const { data } = supabase.storage.from('menu-fotos').getPublicUrl(path);
       setPImagenUrl(data.publicUrl);
+      
+      // Guardar automáticamente en la base de datos
+      await supabase.from('menu_productos')
+        .update({ imagen_url: data.publicUrl })
+        .eq('id', productoId);
+        
+      setUploadedImg(true);
+      setTimeout(() => setUploadedImg(false), 3000);
+    } else {
+      alert('Hubo un error al subir la foto');
     }
     setUploadingImg(false);
+    e.target.value = ''; // Reset input
   };
 
   const removeFoto = async () => {
+    // Si hay una imagen actual, tratar de borrarla del bucket
+    if (pImagenUrl) {
+      try {
+        const oldPath = pImagenUrl.split('/menu-fotos/')[1]?.split('?')[0];
+        if (oldPath) {
+          await supabase.storage.from('menu-fotos').remove([oldPath]);
+        }
+      } catch (err) {
+        console.error('Error al borrar foto anterior', err);
+      }
+    }
     setPImagenUrl(null);
+    
+    // Guardar automáticamente en la base de datos
+    await supabase.from('menu_productos')
+      .update({ imagen_url: null })
+      .eq('id', productoId);
   };
 
   if (checking || !producto) return null;
@@ -529,8 +584,8 @@ export default function ProductoDetailPage() {
                   </div>
                   {/* Acciones */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <label className="btn btn-secondary" style={{ cursor: 'pointer', padding: '8px 14px', fontSize: '0.8rem' }}>
-                      {uploadingImg ? 'Subiendo…' : pImagenUrl ? '📷 Cambiar foto' : '📷 Subir foto'}
+                    <label className={`btn ${uploadedImg ? 'btn-primary' : 'btn-secondary'}`} style={{ cursor: 'pointer', padding: '8px 14px', fontSize: '0.8rem', background: uploadedImg ? '#16a34a' : undefined, color: uploadedImg ? '#fff' : undefined }}>
+                      {uploadingImg ? 'Subiendo…' : uploadedImg ? '✓ Foto Subida' : pImagenUrl ? '📷 Cambiar foto' : '📷 Subir foto'}
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={uploadFoto} disabled={uploadingImg} />
                     </label>
                     {pImagenUrl && (
@@ -581,8 +636,8 @@ export default function ProductoDetailPage() {
                 <div className="field"><label>Mín. Ingred.</label><input type="number" value={pMinT} onChange={e => setPMinT(e.target.value)} /></div>
                 <div className="field"><label>Max Libres</label><input type="number" value={pMaxFree} onChange={e => setPMaxFree(e.target.value)} /></div>
               </div>
-              <button type="submit" className="btn btn-primary" style={{ marginTop: 4 }} disabled={savingProd}>
-                {savingProd ? 'Guardando...' : 'Guardar Cambios'}
+              <button type="submit" className={`btn ${savedProd ? 'btn-secondary' : 'btn-primary'}`} style={{ marginTop: 4, background: savedProd ? '#16a34a' : undefined, color: savedProd ? '#fff' : undefined }} disabled={savingProd}>
+                {savingProd ? 'Guardando...' : savedProd ? '✓ Guardado' : 'Guardar Cambios'}
               </button>
             </form>
           </div>

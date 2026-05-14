@@ -98,7 +98,10 @@ export default function MenuPage() {
 
   const delProducto = async (id: string) => {
     if (!confirm('¿Eliminar este plato?')) return;
-    await supabase.from('menu_productos').delete().eq('id', id);
+    const { error } = await supabase.from('menu_productos').delete().eq('id', id);
+    if (error) {
+      alert('No se puede eliminar este plato porque ya forma parte del historial de pedidos. Por favor, marca el plato como "Oculto" (icono del ojo) para que no aparezca en el menú sin afectar los reportes financieros.');
+    }
     fetchAll();
   };
 
