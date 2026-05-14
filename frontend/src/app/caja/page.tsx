@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
-import { Wallet, Check, AlertCircle, TrendingUp, TrendingDown, DollarSign, Building, Banknote, Landmark } from 'lucide-react';
+import { Wallet, Check, DollarSign, Banknote, Landmark } from 'lucide-react';
 
 export default function CajaPage() {
   const router = useRouter();

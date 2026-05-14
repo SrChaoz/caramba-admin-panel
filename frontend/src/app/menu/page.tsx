@@ -68,10 +68,15 @@ export default function MenuPage() {
     setLoading(false);
   };
 
-  // ── Filtro ──────────────────────────────────────────────
-  const productosFiltrados = tabActivo === 'todos'
-    ? productos
+  // ── Filtro y Orden ──────────────────────────────────────
+  let productosFiltrados = tabActivo === 'todos'
+    ? [...productos]
     : productos.filter(p => (p.categoria_plato || 'General') === tabActivo);
+
+  productosFiltrados.sort((a, b) => {
+    if (a.activo === b.activo) return 0;
+    return a.activo ? -1 : 1;
+  });
 
   // ── Producto ────────────────────────────────────────────
   const saveProducto = async (e: React.FormEvent) => {

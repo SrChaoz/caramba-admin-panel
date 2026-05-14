@@ -24,7 +24,7 @@ type Topping = {
 type CategoriaPlato = { id: number; nombre: string; orden: number };
 type TipoPlato = { id: number; nombre: string; descripcion: string; orden: number };
 
-type ModalState = 'crear_cat' | 'editar_cat' | 'crear_topping' | 'editar_topping' | null;
+type ModalState = 'crear_cat' | 'editar_cat' | 'crear_topping' | 'editar_topping' | 'importar_config' | null;
 
 export default function ProductoDetailPage() {
   const router = useRouter();
@@ -44,6 +44,11 @@ export default function ProductoDetailPage() {
   const [activeTab, setActiveTab] = useState<'ingredientes' | 'categorias' | 'configuracion'>('ingredientes');
   const [modal, setModal] = useState<ModalState>(null);
   const [editId, setEditId] = useState('');
+
+  // Form: Importar
+  const [productosImportables, setProductosImportables] = useState<Producto[]>([]);
+  const [importandoDe, setImportandoDe] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
 
   // Form: Topping
   const [fNombre, setFNombre] = useState('');
@@ -138,7 +143,7 @@ export default function ProductoDetailPage() {
       max_seleccion: fCatMaxSel ? Number(fCatMaxSel) : null
     };
     if (modal === 'crear_cat') {
-      const newId = fCatNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      const newId = `${productoId}-${fCatNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
       await supabase.from('menu_categorias').insert({ id: newId, ...payload });
     } else {
       await supabase.from('menu_categorias').update(payload).eq('id', editId);
@@ -149,6 +154,71 @@ export default function ProductoDetailPage() {
   const delCat = async (id: string) => {
     if (!confirm('¿Eliminar esta categoría y sus ingredientes?')) return;
     await supabase.from('menu_categorias').delete().eq('id', id);
+    fetchAll();
+  };
+
+  const openImportar = async () => {
+    setLoading(true);
+    const { data } = await supabase.from('menu_productos')
+      .select('*')
+      .eq('tipo', 'configurable')
+      .neq('id', productoId);
+    if (data) setProductosImportables(data);
+    setLoading(false);
+    setImportandoDe(data && data.length > 0 ? data[0].id : '');
+    setModal('importar_config');
+  };
+
+  const handleImportar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importandoDe) return;
+    setIsImporting(true);
+
+    const { data: sourceCats } = await supabase.from('menu_categorias').select('*').eq('producto_id', importandoDe);
+    if (!sourceCats || sourceCats.length === 0) {
+        setIsImporting(false);
+        setModal(null);
+        return;
+    }
+
+    const catIds = sourceCats.map((c: any) => c.id);
+    const { data: sourceTops } = await supabase.from('menu_toppings').select('*').in('categoria_id', catIds);
+
+    const newCats = sourceCats.map((c: any) => ({
+      id: `${productoId}-${c.nombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`,
+      producto_id: productoId,
+      nombre: c.nombre,
+      es_requerido: c.es_requerido,
+      orden: c.orden,
+      max_seleccion: c.max_seleccion
+    }));
+    await supabase.from('menu_categorias').insert(newCats);
+
+    const catIdMap = sourceCats.reduce((acc: any, c: any) => {
+       const newId = `${productoId}-${c.nombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
+       acc[c.id] = newId;
+       return acc;
+    }, {});
+
+    if (sourceTops && sourceTops.length > 0) {
+        const newTops = sourceTops.map((t: any) => ({
+           id: `${productoId}-${t.nombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}-${Math.floor(Math.random()*10000)}`,
+           nombre: t.nombre,
+           emoji: t.emoji,
+           categoria_id: catIdMap[t.categoria_id],
+           exclusive_group: t.exclusive_group,
+           precio_extra: t.precio_extra,
+           precio_surcharge: t.precio_surcharge,
+           precio_proteina_combo: t.precio_proteina_combo,
+           disponible: true,
+           orden: t.orden,
+           oculto: t.oculto
+        }));
+        await supabase.from('menu_toppings').insert(newTops);
+    }
+
+    setIsImporting(false);
+    setModal(null);
     fetchAll();
   };
 
@@ -180,7 +250,7 @@ export default function ProductoDetailPage() {
       exclusive_group: fGroup.trim() || null, oculto: fOculto
     };
     if (modal === 'crear_topping') {
-      const newId = fNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      const newId = `${productoId}-${fNombre.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
       await supabase.from('menu_toppings').insert({ id: newId, ...payload, disponible: true });
     } else {
       await supabase.from('menu_toppings').update(payload).eq('id', editId);
@@ -245,6 +315,11 @@ export default function ProductoDetailPage() {
           </div>
         </div>
         <div className="topbar-actions">
+          {(activeTab === 'categorias' || activeTab === 'ingredientes') && producto.tipo === 'configurable' && (
+            <button className="btn btn-secondary" onClick={openImportar}>
+               Importar Categorías
+            </button>
+          )}
           {activeTab === 'categorias' && (
             <button className="btn btn-primary" onClick={openCrearCat}><Plus size={14} /> Nueva Categoría</button>
           )}
@@ -521,9 +596,28 @@ export default function ProductoDetailPage() {
             <div className="modal-title uppercase">
               {modal === 'crear_cat' ? 'Nueva Categoría' :
                modal === 'editar_cat' ? 'Editar Categoría' :
+               modal === 'importar_config' ? 'Importar Categorías y Toppings' :
                modal === 'crear_topping' ? 'Nuevo Ingrediente' : 'Editar Ingrediente'}
               <button onClick={() => setModal(null)}><X size={18} /></button>
             </div>
+
+            {/* Form Importar */}
+            {modal === 'importar_config' && (
+              <form onSubmit={handleImportar} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginBottom: 8, marginTop: 0 }}>
+                  Selecciona de qué plato quieres clonar las categorías y todos sus ingredientes asociados. Los nuevos elementos se añadirán a este plato.
+                </p>
+                <div className="field">
+                  <label>Plato Origen</label>
+                  <select value={importandoDe} onChange={e => setImportandoDe(e.target.value)} required>
+                    {productosImportables.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                  </select>
+                </div>
+                <button type="submit" className="btn btn-primary" style={{ marginTop: 8 }} disabled={isImporting}>
+                  {isImporting ? 'Importando...' : 'Importar Configuración'}
+                </button>
+              </form>
+            )}
 
             {/* Form Categoría */}
             {(modal === 'crear_cat' || modal === 'editar_cat') && (
