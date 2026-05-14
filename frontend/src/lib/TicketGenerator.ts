@@ -198,31 +198,37 @@ export async function generateTicketCanvas(order: OrderData): Promise<HTMLCanvas
       }
     });
 
-    const allIngs = mainIngs.join(', ') + '.';
-    const words = allIngs.split(' ');
-    let line = '';
-    for (const word of words) {
-      if ((line + word).length > 36) {
-        currentY = drawText(line.trim(), 16, 20, currentY, 'left');
-        line = word + ' ';
-      } else {
-        line += word + ' ';
+    const justIngs = mainIngs.filter(i => !i.toLowerCase().startsWith('nota:'));
+    const notes = mainIngs.filter(i => i.toLowerCase().startsWith('nota:'));
+
+    const allIngs = justIngs.join(', ') + '.';
+    if (justIngs.length > 0) {
+      const words = allIngs.split(' ');
+      let line = '';
+      for (const word of words) {
+        if ((line + word).length > 36) {
+          currentY = drawText(line.trim(), 16, 20, currentY, 'left');
+          line = word + ' ';
+        } else {
+          line += word + ' ';
+        }
       }
-    }
-    if (line.trim()) {
-      currentY = drawText(line.trim(), 16, 20, currentY, 'left');
+      if (line.trim()) {
+        currentY = drawText(line.trim(), 16, 20, currentY, 'left');
+      }
+    } else {
+      currentY = drawText('—', 16, 20, currentY, 'left');
     }
 
     if (realExtras.length > 0) {
       currentY += 4;
-      // Dibujar etiqueta EXTRAS en negrita e itálica
       currentY = drawText('* EXTRAS:', 14, 20, currentY, 'left', true, true, false); 
       
       const extraWords = realExtras.join(', ').split(' ');
       let eLine = '';
       for (const word of extraWords) {
-        if ((eLine + word).length > 45) { // Caben más caracteres al ser tamaño 14
-          currentY = drawText(eLine.trim(), 14, 25, currentY, 'left', false, true); // Itálica
+        if ((eLine + word).length > 45) { 
+          currentY = drawText(eLine.trim(), 14, 25, currentY, 'left', false, true); 
           eLine = word + ' ';
         } else {
           eLine += word + ' ';
@@ -230,6 +236,23 @@ export async function generateTicketCanvas(order: OrderData): Promise<HTMLCanvas
       }
       if (eLine.trim()) {
         currentY = drawText(eLine.trim(), 14, 25, currentY, 'left', false, true);
+      }
+    }
+
+    if (notes.length > 0) {
+      currentY += 4;
+      const notesWords = `Nota: ${notes.map(n => n.replace(/^Nota:\s*/i, '')).join(' | ')}`.split(' ');
+      let nLine = '';
+      for (const word of notesWords) {
+        if ((nLine + word).length > 40) {
+          currentY = drawText(nLine.trim(), 16, 20, currentY, 'left', true, false); 
+          nLine = word + ' ';
+        } else {
+          nLine += word + ' ';
+        }
+      }
+      if (nLine.trim()) {
+        currentY = drawText(nLine.trim(), 16, 20, currentY, 'left', true, false);
       }
     }
   });

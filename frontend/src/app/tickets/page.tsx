@@ -814,17 +814,25 @@ export default function TicketsPage() {
                     }
                   });
 
+                  const justIngs = mainIngs.filter(i => !i.toLowerCase().startsWith('nota:'));
+                  const notes = mainIngs.filter(i => i.toLowerCase().startsWith('nota:'));
+
                   return (
                     <div key={idx} style={{ marginBottom: 14 }}>
                       <div style={{ fontFamily: 'Bebas Neue', fontSize: '0.9rem', color: 'var(--accent)', letterSpacing: '0.08em', marginBottom: 5 }}>
                         <Package size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> {detailTicket.cantidad_burritos === 1 ? 'Ingredientes:' : `Burrito ${burritoNumber}:`}
                       </div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.7, paddingLeft: 24 }}>
-                        {mainIngs.length > 0 ? mainIngs.join(', ') + '.' : '—'}
+                        {justIngs.length > 0 ? justIngs.join(', ') + '.' : '—'}
                       </div>
                       {realExtras.length > 0 && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--warning)', paddingLeft: 24, marginTop: 4 }}>
                           <Star size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} /> Extras: {realExtras.join(', ')}
+                        </div>
+                      )}
+                      {notes.length > 0 && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--accent)', paddingLeft: 24, marginTop: 4, fontStyle: 'italic', fontWeight: 600 }}>
+                          📝 {notes.join(' | ')}
                         </div>
                       )}
                     </div>

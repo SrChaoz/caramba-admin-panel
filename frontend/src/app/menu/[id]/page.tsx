@@ -10,6 +10,7 @@ type Producto = {
   id: string; nombre: string; descripcion: string;
   precio_base: number; tipo: 'configurable' | 'simple';
   emoji: string; min_toppings: number; free_toppings_limit: number;
+  ingredientes_texto?: string;
 };
 type Categoria = {
   id: string; nombre: string; es_requerido: boolean;
@@ -64,6 +65,7 @@ export default function ProductoDetailPage() {
   const [pNombre, setPNombre] = useState('');
   const [pEmoji, setPEmoji] = useState('🌯');
   const [pDesc, setPDesc] = useState('');
+  const [pIngredientesTexto, setPIngredientesTexto] = useState('');
   const [pPrecio, setPPrecio] = useState('0');
   const [pTipo, setPTipo] = useState<'configurable' | 'simple'>('configurable');
   const [pMinT, setPMinT] = useState('0');
@@ -113,6 +115,7 @@ export default function ProductoDetailPage() {
       setPMaxFree(String(prodRes.data.free_toppings_limit));
       setPCategoria(prodRes.data.categoria_plato || 'General');
       setPImagenUrl(prodRes.data.imagen_url || null);
+      setPIngredientesTexto(prodRes.data.ingredientes_texto || '');
     }
     if (catRes.data) setCategorias(catRes.data);
     if (topRes.data) {
@@ -275,6 +278,7 @@ export default function ProductoDetailPage() {
       min_toppings: Number(pMinT), free_toppings_limit: Number(pMaxFree),
       categoria_plato: pCategoria.trim() || 'General',
       imagen_url: pImagenUrl,
+      ingredientes_texto: pIngredientesTexto,
     }).eq('id', productoId);
     
     setSavingProd(false);
@@ -633,8 +637,24 @@ export default function ProductoDetailPage() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                 <div className="field"><label>Precio $</label><input type="number" step="0.01" value={pPrecio} onChange={e => setPPrecio(e.target.value)} /></div>
-                <div className="field"><label>Mín. Ingred.</label><input type="number" value={pMinT} onChange={e => setPMinT(e.target.value)} /></div>
-                <div className="field"><label>Max Libres</label><input type="number" value={pMaxFree} onChange={e => setPMaxFree(e.target.value)} /></div>
+                
+                {pTipo === 'simple' && (
+                  <div className="field" style={{ gridColumn: 'span 2' }}>
+                    <label>Ingredientes (Texto Plano) - Solo Ticket y Web Order</label>
+                    <textarea 
+                      rows={2} 
+                      value={pIngredientesTexto} 
+                      onChange={e => setPIngredientesTexto(e.target.value)} 
+                      placeholder="Ej: Arroz, chorizo, frejol rojo, maduro..." 
+                    />
+                  </div>
+                )}
+                {pTipo !== 'simple' && (
+                  <>
+                    <div className="field"><label>Mín. Ingred.</label><input type="number" value={pMinT} onChange={e => setPMinT(e.target.value)} /></div>
+                    <div className="field"><label>Max Libres</label><input type="number" value={pMaxFree} onChange={e => setPMaxFree(e.target.value)} /></div>
+                  </>
+                )}
               </div>
               <button type="submit" className={`btn ${savedProd ? 'btn-secondary' : 'btn-primary'}`} style={{ marginTop: 4, background: savedProd ? '#16a34a' : undefined, color: savedProd ? '#fff' : undefined }} disabled={savingProd}>
                 {savingProd ? 'Guardando...' : savedProd ? '✓ Guardado' : 'Guardar Cambios'}
