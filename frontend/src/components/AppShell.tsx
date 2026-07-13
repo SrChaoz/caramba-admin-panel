@@ -4,20 +4,21 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
-  Ticket, Package, DollarSign, ReceiptText, Users, LogOut, Utensils, BarChart3, Tag, Inbox, Settings
+  Ticket, Package, DollarSign, ReceiptText, Users, LogOut, Utensils, BarChart3, Tag, Inbox, Settings, UtensilsCrossed
 } from 'lucide-react';
 
 const NAV = [
-  { href: '/caja',          label: 'Turno / Caja',   icon: Inbox      },
-  { href: '/tickets',       label: 'Pedidos',         icon: Ticket     },
-  { href: '/menu',          label: 'Menú Web',        icon: Utensils   },
-  { href: '/promociones',   label: 'Promociones',     icon: Tag        },
-  { href: '/finanzas',      label: 'Finanzas',        icon: DollarSign },
-  { href: '/gastos',        label: 'Gastos',          icon: ReceiptText},
-  { href: '/nomina',        label: 'Nómina / Pagos',  icon: Users      },
-  { href: '/inventario',    label: 'Inventario',      icon: Package    },
-  { href: '/analiticas',    label: 'Analíticas',      icon: BarChart3  },
-  { href: '/configuracion', label: 'Configuración',   icon: Settings   },
+  { href: '/caja',          label: 'Turno / Caja',   icon: Inbox           },
+  { href: '/mesero',        label: 'Mesero / POS',   icon: UtensilsCrossed },
+  { href: '/tickets',       label: 'Pedidos',         icon: Ticket          },
+  { href: '/menu',          label: 'Menú Web',        icon: Utensils        },
+  { href: '/promociones',   label: 'Promociones',     icon: Tag             },
+  { href: '/finanzas',      label: 'Finanzas',        icon: DollarSign      },
+  { href: '/gastos',        label: 'Gastos',          icon: ReceiptText     },
+  { href: '/nomina',        label: 'Nómina / Pagos',  icon: Users           },
+  { href: '/inventario',    label: 'Inventario',      icon: Package         },
+  { href: '/analiticas',    label: 'Analíticas',      icon: BarChart3       },
+  { href: '/configuracion', label: 'Configuración',   icon: Settings        },
 ];
 
 export default function AppShell({ children, user }: { children: React.ReactNode; user?: { email?: string } }) {

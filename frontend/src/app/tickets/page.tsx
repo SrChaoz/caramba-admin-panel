@@ -25,6 +25,8 @@ type Pedido = {
   extras: Extra[];
   metodo_pago: string;
   fecha_pedido: string;
+  canal?: string;
+  mesa_id?: number;
 };
 
 type DialogType = 'confirm' | 'ready' | 'deliver' | 'delete' | null;
@@ -572,6 +574,14 @@ export default function TicketsPage() {
                     <div className="ticket-header">
                       <span className="ticket-code">{p.codigo_ticket || '#----'}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {p.canal === 'mesa' && (
+                          <span style={{
+                            fontSize: '0.55rem', fontWeight: 900, letterSpacing: '0.1em',
+                            background: 'rgba(59,130,246,0.15)', color: '#60a5fa',
+                            border: '1px solid rgba(59,130,246,0.3)',
+                            padding: '2px 7px', borderRadius: 99, textTransform: 'uppercase',
+                          }}>🪑 MESA</span>
+                        )}
                         <span className="ticket-total">${Number(p.total).toFixed(2)}</span>
                         <ChevronRight size={13} color="var(--text-dim)" />
                       </div>
@@ -873,6 +883,14 @@ function KanbanCol({ title, color, tickets, actions, onOpen, variant = 'default'
                 <div className="ticket-header">
                   <span className="ticket-code">{p.codigo_ticket || '#----'}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {p.canal === 'mesa' && (
+                      <span style={{
+                        fontSize: '0.55rem', fontWeight: 900, letterSpacing: '0.1em',
+                        background: 'rgba(59,130,246,0.15)', color: '#60a5fa',
+                        border: '1px solid rgba(59,130,246,0.3)',
+                        padding: '2px 7px', borderRadius: 99, textTransform: 'uppercase',
+                      }}>🪑 MESA</span>
+                    )}
                     <span className="ticket-total">${Number(p.total).toFixed(2)}</span>
                     <ChevronRight size={13} color="var(--text-dim)" />
                   </div>

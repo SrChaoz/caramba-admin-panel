@@ -11,6 +11,7 @@ type Producto = {
   precio_base: number; tipo: string;
   emoji: string; min_toppings: number; free_toppings_limit: number;
   activo: boolean; categoria_plato: string;
+  visible_web: boolean; visible_mesero: boolean;
 };
 type CategoriaPlato = { id: number; nombre: string; orden: number };
 type TipoPlato = { id: number; nombre: string; descripcion: string; orden: number };
@@ -105,8 +106,13 @@ export default function MenuPage() {
     fetchAll();
   };
 
-  const toggleActivo = async (p: Producto) => {
-    await supabase.from('menu_productos').update({ activo: !p.activo }).eq('id', p.id);
+  const toggleWeb = async (p: Producto) => {
+    await supabase.from('menu_productos').update({ visible_web: !p.visible_web }).eq('id', p.id);
+    fetchAll();
+  };
+
+  const toggleMesero = async (p: Producto) => {
+    await supabase.from('menu_productos').update({ visible_mesero: !p.visible_mesero }).eq('id', p.id);
     fetchAll();
   };
 
@@ -224,7 +230,7 @@ export default function MenuPage() {
               style={{
                 padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
                 cursor: 'pointer', transition: 'border-color 0.2s',
-                opacity: p.activo ? 1 : 0.5,
+                opacity: (p.visible_web || p.visible_mesero) ? 1 : 0.45,
               }}
               onClick={() => router.push(`/menu/${p.id}`)}
             >
@@ -240,7 +246,17 @@ export default function MenuPage() {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 2 }}>{p.tipo}</div>
+                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{p.tipo}</span>
+                    {p.tipo === 'bebida' && <span style={{ fontSize: '0.55rem', fontWeight: 900, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.25)', padding: '1px 6px', borderRadius: 99 }}>🧃 BEBIDA</span>}
+                    {/* Badges de visibilidad */}
+                    <span title="Web Order" style={{ fontSize: '0.55rem', fontWeight: 900, padding: '1px 6px', borderRadius: 99, background: p.visible_web ? 'rgba(22,163,74,0.15)' : 'rgba(255,255,255,0.06)', color: p.visible_web ? '#4ade80' : 'var(--text-muted)', border: `1px solid ${p.visible_web ? 'rgba(22,163,74,0.3)' : 'rgba(255,255,255,0.08)'}` }}>
+                      🌐 Web
+                    </span>
+                    <span title="Mesero / POS" style={{ fontSize: '0.55rem', fontWeight: 900, padding: '1px 6px', borderRadius: 99, background: p.visible_mesero ? 'rgba(234,179,8,0.15)' : 'rgba(255,255,255,0.06)', color: p.visible_mesero ? '#fbbf24' : 'var(--text-muted)', border: `1px solid ${p.visible_mesero ? 'rgba(234,179,8,0.3)' : 'rgba(255,255,255,0.08)'}` }}>
+                      🪑 Mesero
+                    </span>
+                  </div>
                   <div style={{ fontWeight: 800, color: 'var(--accent)', fontSize: '1.1rem', marginTop: 4 }}>
                     ${Number(p.precio_base).toFixed(2)}
                   </div>
@@ -254,11 +270,19 @@ export default function MenuPage() {
               >
                 <button
                   className="btn btn-secondary"
-                  title={p.activo ? 'Ocultar en web order' : 'Mostrar en web order'}
-                  style={{ color: p.activo ? '#16a34a' : 'var(--text-dim)', padding: '6px 10px' }}
-                  onClick={() => toggleActivo(p)}
+                  title={p.visible_web ? 'Ocultar en Web Order' : 'Mostrar en Web Order'}
+                  style={{ color: p.visible_web ? '#4ade80' : 'var(--text-dim)', padding: '6px 10px', fontSize: '0.65rem', fontWeight: 800, gap: 4 }}
+                  onClick={() => toggleWeb(p)}
                 >
-                  {p.activo ? <Eye size={14} /> : <EyeOff size={14} />}
+                  🌐 {p.visible_web ? <Eye size={13} /> : <EyeOff size={13} />}
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  title={p.visible_mesero ? 'Ocultar en Mesero/POS' : 'Mostrar en Mesero/POS'}
+                  style={{ color: p.visible_mesero ? '#fbbf24' : 'var(--text-dim)', padding: '6px 10px', fontSize: '0.65rem', fontWeight: 800, gap: 4 }}
+                  onClick={() => toggleMesero(p)}
+                >
+                  🪑 {p.visible_mesero ? <Eye size={13} /> : <EyeOff size={13} />}
                 </button>
                 <button className="btn btn-secondary" style={{ padding: '6px 10px' }} onClick={() => openEditar(p)}>
                   <Pencil size={14} />
@@ -286,6 +310,7 @@ export default function MenuPage() {
                 <div className="field" style={{ flex: 1 }}><label>Nombre</label><input value={fNombre} onChange={e => setFNombre(e.target.value)} required /></div>
               </div>
               <div className="field"><label>Descripción</label><textarea value={fDesc} onChange={e => setFDesc(e.target.value)} /></div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div className="field">
                   <label>Tipo de Plato</label>
@@ -300,12 +325,27 @@ export default function MenuPage() {
                   </select>
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div className="field"><label>Precio $</label><input type="number" step="0.01" value={fPrecio} onChange={e => setFPrecio(e.target.value)} /></div>
-                <div className="field"><label>Mín. Ingred.</label><input type="number" value={fMinT} onChange={e => setFMinT(e.target.value)} /></div>
-                <div className="field"><label>Max Libres</label><input type="number" value={fMaxFree} onChange={e => setFMaxFree(e.target.value)} /></div>
-              </div>
-              <button type="submit" className="btn btn-primary" style={{ marginTop: 8 }}>Guardar Plato</button>
+
+              {/* Banner informativo para bebidas */}
+              {fTipo === 'bebida' && (
+                <div style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', borderRadius: 10, padding: '10px 14px', fontSize: '0.78rem', color: '#93c5fd', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>🧃</span>
+                  <span><strong>Bebida:</strong> Solo necesita nombre, precio y descripción. No requiere toppings ni ingredientes. En el POS del mesero aparecerá con un modal simplificado (solo cantidad + nota).</span>
+                </div>
+              )}
+
+              {/* Precio: siempre visible */}
+              <div className="field"><label>Precio $</label><input type="number" step="0.01" value={fPrecio} onChange={e => setFPrecio(e.target.value)} /></div>
+
+              {/* Campos de ingredientes: solo para configurable y simple */}
+              {fTipo !== 'bebida' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="field"><label>Mín. Ingredientes</label><input type="number" value={fMinT} onChange={e => setFMinT(e.target.value)} /></div>
+                  <div className="field"><label>Máx. Libres</label><input type="number" value={fMaxFree} onChange={e => setFMaxFree(e.target.value)} /></div>
+                </div>
+              )}
+
+              <button type="submit" className="btn btn-primary" style={{ marginTop: 8 }}>Guardar</button>
             </form>
           </div>
         </div>

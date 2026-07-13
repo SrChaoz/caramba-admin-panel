@@ -8,6 +8,7 @@ import { Plus, Trash2 } from 'lucide-react';
 
 type CategoriaPlato = { id: number; nombre: string; orden: number };
 type TipoPlato = { id: number; nombre: string; descripcion: string; orden: number };
+type Mesa = { id: number; nombre: string; activa: boolean; orden: number };
 
 export default function ConfiguracionPage() {
   const router = useRouter();
@@ -26,6 +27,8 @@ export default function ConfiguracionPage() {
   const [nuevaCat, setNuevaCat] = useState('');
   const [nuevoTipo, setNuevoTipo] = useState('');
   const [nuevoTipoDesc, setNuevoTipoDesc] = useState('');
+  const [mesas, setMesas] = useState<Mesa[]>([]);
+  const [nuevaMesa, setNuevaMesa] = useState('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -46,13 +49,15 @@ export default function ConfiguracionPage() {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [confRes, catRes, tipoRes] = await Promise.all([
+    const [confRes, catRes, tipoRes, mesasRes] = await Promise.all([
       supabase.from('restaurante_config').select('*'),
       supabase.from('categorias_plato').select('*').order('orden'),
       supabase.from('tipos_plato').select('*').order('orden'),
+      supabase.from('mesas').select('*').order('orden'),
     ]);
     if (catRes.data) setCategorias(catRes.data);
     if (tipoRes.data) setTipos(tipoRes.data);
+    if (mesasRes.data) setMesas(mesasRes.data);
     if (confRes.data) {
       setWhatsapp(confRes.data?.find((c: any) => c.clave === 'whatsapp_phone')?.valor?.replace(/"/g, '') || '');
       const rawDays = confRes.data?.find((c: any) => c.clave === 'dias_entrega')?.valor;
@@ -111,6 +116,25 @@ export default function ConfiguracionPage() {
   const delTipo = async (id: number) => {
     if (!confirm('¿Eliminar este tipo?')) return;
     await supabase.from('tipos_plato').delete().eq('id', id);
+    fetchAll();
+  };
+
+  const addMesa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nuevaMesa.trim()) return;
+    await supabase.from('mesas').insert({ nombre: nuevaMesa.trim(), activa: true, orden: mesas.length + 1 });
+    setNuevaMesa(''); fetchAll();
+  };
+
+  const toggleMesa = async (m: Mesa) => {
+    await supabase.from('mesas').update({ activa: !m.activa }).eq('id', m.id);
+    fetchAll();
+  };
+
+  const delMesa = async (id: number) => {
+    if (!confirm('¿Eliminar esta mesa? Solo es posible si no tiene pedidos activos.')) return;
+    const { error } = await supabase.from('mesas').delete().eq('id', id);
+    if (error) alert('No se puede eliminar: la mesa tiene pedidos asociados. Desactívala en su lugar.');
     fetchAll();
   };
 
@@ -230,6 +254,41 @@ export default function ConfiguracionPage() {
               placeholder="Descripción (opcional)"
               value={nuevoTipoDesc}
               onChange={e => setNuevoTipoDesc(e.target.value)}
+            />
+            <button type="submit" className="btn btn-primary"><Plus size={14} /> Agregar</button>
+          </form>
+        </div>
+        {/* ── Mesas del Restaurante ── */}
+        <div className="card" style={{ padding: 24 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 4 }}>🪑 Mesas del Restaurante</h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: 16 }}>
+            Crea y gestiona las mesas disponibles para los meseros.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+            {mesas.map(m => (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', background: 'var(--surface-hi)', borderRadius: 8 }}>
+                <span style={{ fontWeight: 700, color: m.activa ? 'var(--text)' : 'var(--text-dim)' }}>
+                  🪑 {m.nombre}
+                  {!m.activa && <span style={{ marginLeft: 8, fontSize: '0.65rem', background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 99 }}>Desactivada</span>}
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.7rem', color: m.activa ? 'var(--warning)' : 'var(--success)' }} onClick={() => toggleMesa(m)}>
+                    {m.activa ? 'Desactivar' : 'Activar'}
+                  </button>
+                  <button className="btn btn-secondary" style={{ color: 'var(--danger)', padding: '4px 8px' }} onClick={() => delMesa(m.id)}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {mesas.length === 0 && <div style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>No hay mesas configuradas todavía.</div>}
+          </div>
+          <form onSubmit={addMesa} style={{ display: 'flex', gap: 8 }}>
+            <input
+              style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--surface-hi)', padding: '8px 12px', borderRadius: 8, color: 'var(--text)', outline: 'none' }}
+              placeholder="Nueva mesa (ej: Mesa 7, Barra, Terraza…)"
+              value={nuevaMesa}
+              onChange={e => setNuevaMesa(e.target.value)}
             />
             <button type="submit" className="btn btn-primary"><Plus size={14} /> Agregar</button>
           </form>
