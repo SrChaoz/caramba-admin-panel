@@ -273,8 +273,14 @@ export default function TicketsPage() {
       }
     }
     else if (type === 'deliver') {
-      const { data: sData } = await supabase.from('sesiones_caja').select('id').eq('estado', 'ABIERTA').single();
-      await supabase.from('pedidos').update({ estado: 'entregado', metodo_pago: payload?.metodoPago || ticket.metodo_pago, sesion_caja_id: sData ? sData.id : null }).eq('id', ticket.id);
+      if (ticket.canal === 'mesa') {
+        // Mesa order: only mark as delivered to table. Not paid yet.
+        await supabase.from('pedidos').update({ estado: 'entregado' }).eq('id', ticket.id);
+      } else {
+        // Web/other order: delivered and paid.
+        const { data: sData } = await supabase.from('sesiones_caja').select('id').eq('estado', 'ABIERTA').single();
+        await supabase.from('pedidos').update({ estado: 'entregado', metodo_pago: payload?.metodoPago || ticket.metodo_pago, sesion_caja_id: sData ? sData.id : null }).eq('id', ticket.id);
+      }
     }
     else if (type === 'delete')  await supabase.from('pedidos').delete().eq('id', ticket.id);
     await fetchPedidos();

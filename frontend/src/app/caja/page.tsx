@@ -42,7 +42,7 @@ export default function CajaPage() {
     if (data) {
       // Calculate ventas y salidas por método
       const [ventasRes, salidasRes] = await Promise.all([
-        supabase.from('pedidos').select('total, metodo_pago').eq('sesion_caja_id', data.id).eq('estado', 'entregado'),
+        supabase.from('pedidos').select('total, metodo_pago').eq('sesion_caja_id', data.id).in('estado', ['entregado', 'cobrado']),
         supabase.from('transacciones').select('monto, metodo_pago').eq('sesion_caja_id', data.id).eq('tipo', 'SALIDA')
       ]);
 
