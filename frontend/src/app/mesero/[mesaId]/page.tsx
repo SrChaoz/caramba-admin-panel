@@ -13,7 +13,7 @@ type Topping    = { id: string; categoria_id: string; nombre: string; emoji: str
 type CartItem   = { instanceId: string; productoId: string; nombre: string; emoji: string; tipo: string; toppings: string[]; nota: string; precio: number; subtotal: number; };
 type PedidoItem = { id: string; producto_nombre: string; cantidad: number; subtotal: number; nota: string|null; };
 type Pedido     = { id: string; codigo_ticket: string; total: number; estado: string; pedido_items: PedidoItem[]; };
-type Mesa       = { id: number; nombre: string; estado: string };
+type Mesa       = { id: number; nombre: string; estado: string; carrito?: CartItem[] };
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 const S = {
@@ -40,7 +40,6 @@ export default function MesaMenuPage() {
   const [cart,       setCart]       = useState<CartItem[]>([]);
   const [pedidos,    setPedidos]    = useState<Pedido[]>([]);
   const [cartOpen,   setCartOpen]   = useState(false); // <--- Controla si el carrito está expandido
-  const [cartLoaded, setCartLoaded] = useState(false);
   const [modal,      setModal]      = useState<Producto|null>(null);
   const [modalQty,   setModalQty]   = useState(1);
   const [modalTops,  setModalTops]  = useState<string[]>([]);
@@ -54,27 +53,7 @@ export default function MesaMenuPage() {
     });
   }, [router]);
 
-  // Recuperar carrito local no enviado
-  useEffect(() => {
-    if (mesaId) {
-      const saved = localStorage.getItem(`cart_mesa_${mesaId}`);
-      if (saved) {
-        try { setCart(JSON.parse(saved)); } catch(e) {}
-      }
-      setCartLoaded(true);
-    }
-  }, [mesaId]);
-
-  // Guardar carrito localmente en cada cambio
-  useEffect(() => {
-    if (cartLoaded && mesaId) {
-      if (cart.length > 0) {
-        localStorage.setItem(`cart_mesa_${mesaId}`, JSON.stringify(cart));
-      } else {
-        localStorage.removeItem(`cart_mesa_${mesaId}`);
-      }
-    }
-  }, [cart, cartLoaded, mesaId]);
+  // Se eliminó la lógica de localStorage para usar la BD
 
   const loadPedidos = useCallback(async () => {
     const { data } = await supabase
@@ -94,13 +73,14 @@ export default function MesaMenuPage() {
     (async () => {
       setLoading(true);
       const [mR, pR, cR, mcR, tR] = await Promise.all([
-        supabase.from('mesas').select('id,nombre,estado').eq('id', mesaId).single(),
+        supabase.from('mesas').select('id,nombre,estado,carrito').eq('id', mesaId).single(),
         supabase.from('menu_productos').select('*').eq('activo',true).eq('visible_mesero',true).order('orden'),
         supabase.from('categorias_plato').select('*').order('orden'),
         supabase.from('menu_categorias').select('*').order('orden'),
         supabase.from('menu_toppings').select('*').eq('disponible',true).order('orden'),
       ]);
       setMesa(mR.data);
+      if (mR.data?.carrito) setCart(mR.data.carrito);
       setProductos(pR.data || []);
       setCategorias(cR.data || []);
       setMenuCats(mcR.data || []);
@@ -131,10 +111,13 @@ export default function MesaMenuPage() {
   const addToCart = async () => {
     if (!modal) return;
     const sub = calcSub(modal, modalTops, modalQty);
+    const newItems = [];
     for (let i = 0; i < modalQty; i++) {
-      setCart(c => [...c, { instanceId:uid(), productoId:modal.id, nombre:modal.nombre, emoji:modal.emoji, tipo:modal.tipo, toppings:modalTops, nota:modalNota, precio:modal.precio_base, subtotal: sub/modalQty }]);
+      newItems.push({ instanceId:uid(), productoId:modal.id, nombre:modal.nombre, emoji:modal.emoji, tipo:modal.tipo, toppings:modalTops, nota:modalNota, precio:modal.precio_base, subtotal: sub/modalQty });
     }
-    if (cart.length === 0) await supabase.from('mesas').update({ estado:'ocupada' }).eq('id', mesaId);
+    const newCart = [...cart, ...newItems];
+    setCart(newCart);
+    await supabase.from('mesas').update({ estado:'ocupada', carrito: newCart }).eq('id', mesaId);
     closeModal();
     setCartOpen(true); // Auto-expandir cuando agregas algo nuevo
   };
@@ -163,7 +146,7 @@ export default function MesaMenuPage() {
     const payload = { id:pedidoId, codigo_ticket:codigo, canal:'mesa', mesa_id:mesa.id, mesero_id:session.user.id, cliente_nombre:mesa.nombre, cliente_telefono:'', cliente_direccion:'', dia_entrega:new Date().toLocaleDateString('es-EC',{weekday:'long'}), bloque_horario:new Date().toLocaleTimeString('es-EC',{hour:'2-digit',minute:'2-digit'}), cantidad_burritos:cart.length, total:Number(cartSubtotal.toFixed(2)), ingredientes:allIngs, extras:allExtras, estado:'pendiente', metodo_pago:'Efectivo', sesion_caja_id:caja?.id||null };
     await supabase.from('pedidos').insert(payload);
     await supabase.from('pedido_items').insert(cart.map(item => ({ pedido_id:pedidoId, producto_id:item.productoId, producto_nombre:item.nombre, cantidad:1, ingredientes:item.toppings, nota:item.nota||null, subtotal:item.subtotal })));
-    await supabase.from('mesas').update({ estado:'ocupada' }).eq('id', mesa.id);
+    await supabase.from('mesas').update({ estado:'ocupada', carrito: [] }).eq('id', mesa.id);
     if (printerInstance.isConnected()) { try { const cv = await generateTicketCanvas(payload as any); await printerInstance.printCanvas(cv); } catch {} }
     setCart([]);
     setSaving(false);
@@ -279,7 +262,12 @@ export default function MesaMenuPage() {
                   <div>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, paddingTop: pedidos.length>0 ? 16 : 0, borderTop: pedidos.length>0 ? '1px dashed rgba(204,0,0,0.3)' : 'none' }}>
                       <span style={{ fontSize:'0.75rem', fontWeight:900, color:'var(--accent)' }}>NUEVO PEDIDO (Sin enviar)</span>
-                      <button onClick={() => { if(confirm('¿Descartar este pedido no enviado?')) setCart([]); }} style={{ background:'transparent', border:'none', color:'var(--text-dim)', fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+                      <button onClick={async () => { 
+                        if(confirm('¿Descartar este pedido no enviado?')) { 
+                          setCart([]); 
+                          await supabase.from('mesas').update({ carrito: [] }).eq('id', mesaId);
+                        } 
+                      }} style={{ background:'transparent', border:'none', color:'var(--text-dim)', fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
                         <Trash2 size={14}/> Descartar
                       </button>
                     </div>
@@ -292,7 +280,11 @@ export default function MesaMenuPage() {
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                             <span style={{ color:'var(--accent)', fontWeight:800 }}>${item.subtotal.toFixed(2)}</span>
-                            <button onClick={() => setCart(c=>c.filter(i=>i.instanceId!==item.instanceId))} style={{ background:'rgba(204,0,0,0.15)', border:'none', borderRadius:99, width:28, height:28, color:'var(--accent)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                            <button onClick={async () => {
+                              const newCart = cart.filter(i=>i.instanceId!==item.instanceId);
+                              setCart(newCart);
+                              await supabase.from('mesas').update({ carrito: newCart }).eq('id', mesaId);
+                            }} style={{ background:'rgba(204,0,0,0.15)', border:'none', borderRadius:99, width:28, height:28, color:'var(--accent)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
                               <X size={14}/>
                             </button>
                           </div>

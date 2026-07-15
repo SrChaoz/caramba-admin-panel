@@ -108,7 +108,7 @@ export default function AdminMesasPage() {
     // Marcar todos los pedidos como cobrado y asociarlos a la caja
     await Promise.all(mesaPedidos.map(p => supabase.from('pedidos').update({ estado:'cobrado', sesion_caja_id: sData ? sData.id : null }).eq('id', p.id)));
     // Liberar mesa
-    await supabase.from('mesas').update({ estado:'libre' }).eq('id', selected.id);
+    await supabase.from('mesas').update({ estado:'libre', carrito: [] }).eq('id', selected.id);
     // Generar ticket resumen si hay impresora
     if (printerInstance.isConnected() && session) {
       try {
@@ -139,7 +139,7 @@ export default function AdminMesasPage() {
     // Marcar todos los pedidos como cancelado
     await Promise.all(mesaPedidos.map(p => supabase.from('pedidos').update({ estado:'cancelado' }).eq('id', p.id)));
     // Liberar mesa
-    await supabase.from('mesas').update({ estado:'libre' }).eq('id', selected.id);
+    await supabase.from('mesas').update({ estado:'libre', carrito: [] }).eq('id', selected.id);
     
     setActing(false);
     setSelected(null);
@@ -156,7 +156,8 @@ export default function AdminMesasPage() {
       nombre,
       estado: 'libre',
       activa: true,
-      orden
+      orden,
+      carrito: []
     });
     setActing(false);
     await loadAll();
