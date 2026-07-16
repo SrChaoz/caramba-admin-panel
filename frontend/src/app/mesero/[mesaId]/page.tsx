@@ -70,6 +70,10 @@ export default function MesaMenuPage() {
 
   useEffect(() => {
     if (checking || !mesaId) return;
+    
+    // Purgar cualquier caché viejo que haya quedado en el dispositivo del mesero
+    try { localStorage.removeItem(`cart_mesa_${mesaId}`); } catch(e) {}
+
     (async () => {
       setLoading(true);
       const [mR, pR, cR, mcR, tR] = await Promise.all([
