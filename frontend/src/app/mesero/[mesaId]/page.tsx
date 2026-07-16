@@ -63,9 +63,6 @@ export default function MesaMenuPage() {
       .not('estado','in','(cobrado,cancelado)')
       .order('fecha_pedido', { ascending: true });
     setPedidos((data || []) as Pedido[]);
-    if ((data||[]).length > 0) {
-      await supabase.from('mesas').update({ estado:'ocupada' }).eq('id', mesaId);
-    }
   }, [mesaId]);
 
   useEffect(() => {
